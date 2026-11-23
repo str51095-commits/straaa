@@ -1,0 +1,28 @@
+# 用法：
+#   1. cp .env.example .env   然后编辑 .env 填写密码等
+#   2. docker compose up -d                      # 仅 HTTP，访问 http://服务器IP:8000
+#      docker compose --profile https up -d      # 有域名时，自动申请 HTTPS 证书
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SOLAR_TRUST_PROXY: "1"
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./data:/data
+
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${DOMAIN:?请在 .env 中设置 DOMAIN} --to app:8000
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./data/caddy:/data
+    depends_on:
+      - app

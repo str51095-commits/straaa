@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · 光伏能源管理平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='5' fill='%23eda100'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="login-page">
+<form class="card login-card" id="loginForm">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></svg>
+    <span>光伏能源管理平台</span>
+  </div>
+  <label class="form">密码<input type="password" name="password" autocomplete="current-password" required autofocus></label>
+  <button class="btn primary" type="submit">登录</button>
+  <p class="login-err" id="err" role="alert"></p>
+</form>
+<script>
+try { const t = localStorage.getItem("solar.theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+document.getElementById("loginForm").onsubmit = async e => {
+  e.preventDefault();
+  const btn = e.target.querySelector("button"), err = document.getElementById("err");
+  btn.disabled = true; err.textContent = "";
+  try {
+    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: e.target.password.value }) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) location.href = "/"; else err.textContent = d.error || "登录失败";
+  } catch { err.textContent = "无法连接服务器"; }
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>

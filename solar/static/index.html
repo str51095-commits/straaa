@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>光伏能源管理平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='5' fill='%23eda100'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></svg>
+    <span>光伏能源管理平台</span>
+  </div>
+  <div class="topbar-actions">
+    <label class="sr-only" for="stationSelect">选择电站</label>
+    <select id="stationSelect"></select>
+    <button class="icon-btn" id="themeBtn" title="切换深色/浅色" aria-label="切换深色/浅色"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg></button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-view="dashboard">概览</button>
+  <button class="tab" data-view="entry">数据录入</button>
+  <button class="tab" data-view="stations">电站管理</button>
+</nav>
+
+<main>
+  <!-- 概览 -->
+  <section id="view-dashboard" class="view active">
+    <div id="emptyState" class="card empty hidden">
+      <h2>还没有电站</h2>
+      <p>先添加你的光伏电站，然后录入每天的发电量；也可以生成演示数据先体验一下。</p>
+      <div class="row-gap">
+        <button class="btn primary" data-goto="stations">添加电站</button>
+        <button class="btn" id="demoBtn">生成演示数据</button>
+      </div>
+    </div>
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="seg" role="tablist" id="periodSeg">
+          <button class="active" data-period="daily">日发电量</button>
+          <button data-period="monthly">月发电量</button>
+          <button data-period="yearly">年发电量</button>
+        </div>
+        <div class="period-ctrl">
+          <button class="icon-btn" id="prevBtn" title="上一个">‹</button>
+          <input type="month" id="monthInput">
+          <input type="number" id="yearInput" min="2000" max="2100" class="hidden">
+          <button class="icon-btn" id="nextBtn" title="下一个">›</button>
+        </div>
+      </div>
+      <h3 id="chartTitle" class="chart-title"></h3>
+      <div class="stats-row" id="periodStats"></div>
+      <div id="legend" class="legend"></div>
+      <div class="chart-wrap" id="chart"></div>
+      <details class="table-toggle">
+        <summary>查看数据表</summary>
+        <div class="table-scroll"><table id="periodTable"></table></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- 数据录入 -->
+  <section id="view-entry" class="view">
+    <div class="grid-2">
+      <div class="card">
+        <h2>录入日发电量</h2>
+        <form id="recordForm" class="form">
+          <label>电站<select name="station_id" required></select></label>
+          <label>日期<input type="date" name="day" required></label>
+          <label>发电量 (kWh)<input type="number" name="kwh" step="0.01" min="0" required placeholder="例如 186.5"></label>
+          <label>备注<input type="text" name="note" placeholder="可选，例如：阴雨、清洗组件"></label>
+          <button class="btn primary" type="submit">保存</button>
+          <p class="hint">同一电站同一天重复录入会覆盖原有数据。</p>
+        </form>
+      </div>
+      <div class="card">
+        <h2>批量导入 / 导出</h2>
+        <form id="importForm" class="form">
+          <label>电站<select name="station_id" required></select></label>
+          <label>CSV 文件<input type="file" name="file" accept=".csv,.txt"></label>
+          <label>或直接粘贴（每行：日期,发电量）
+            <textarea name="csv" rows="6" placeholder="2024-06-01,210.5&#10;2024-06-02,198.3"></textarea>
+          </label>
+          <button class="btn primary" type="submit">导入</button>
+        </form>
+        <div class="row-gap" style="margin-top:12px">
+          <a class="btn" id="exportLink" href="/api/export">导出 CSV（当前电站）</a>
+        </div>
+      </div>
+    </div>
+    <div class="card" id="syncCard">
+      <div class="card-head">
+        <h2>固德威自动同步</h2>
+        <button class="btn" id="syncBtn">立即同步</button>
+      </div>
+      <p id="syncMsg" class="sync-msg"></p>
+      <div class="table-scroll"><table id="syncTable"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>最近记录</h2>
+        <div class="period-ctrl">
+          <input type="month" id="recordsMonth">
+        </div>
+      </div>
+      <div class="table-scroll"><table id="recordsTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 电站管理 -->
+  <section id="view-stations" class="view">
+    <div class="grid-2">
+      <div class="card">
+        <h2 id="stationFormTitle">添加电站</h2>
+        <form id="stationForm" class="form">
+          <input type="hidden" name="id">
+          <label>电站名称<input name="name" required placeholder="例如：家庭屋顶电站"></label>
+          <label>装机容量 (kWp)<input type="number" name="capacity_kwp" step="0.01" min="0" required></label>
+          <label>上网电价 / 收益单价 (元/kWh)<input type="number" name="price" step="0.0001" min="0" value="0.4"></label>
+          <label>地址<input name="location" placeholder="可选"></label>
+          <label>并网日期<input type="date" name="commission_date"></label>
+          <label>备注<input name="notes" placeholder="可选"></label>
+          <label>固德威电站 ID（自动同步用，可选）
+            <input name="goodwe_station_id" placeholder="SEMS 网页版电站页面网址中的 ID">
+          </label>
+          <div class="row-gap">
+            <button class="btn primary" type="submit">保存</button>
+            <button class="btn hidden" type="button" id="stationCancel">取消编辑</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>我的电站</h2>
+        <div class="table-scroll"><table id="stationsTable"></table></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="tooltip" class="tooltip hidden" role="status"></div>
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>
