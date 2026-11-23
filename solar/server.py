@@ -32,6 +32,8 @@ class App:
             ("GET", r"/api/stations", self.stations_list),
             ("POST", r"/api/stations", self.stations_create),
             ("PUT", r"/api/stations/(\d+)", self.stations_update),
+            ("POST", r"/api/stations/price", self.stations_price),
+            ("GET", r"/api/settings", self.settings_get),
             ("DELETE", r"/api/stations/(\d+)", self.stations_delete),
             ("GET", r"/api/records", self.records_list),
             ("POST", r"/api/records", self.records_upsert),
@@ -59,6 +61,13 @@ class App:
     def stations_update(self, q, body, sid):
         st = db.update_station(self.conn, int(sid), body)
         return (200, st) if st else (404, {"error": "电站不存在"})
+
+    def stations_price(self, q, body):
+        n = db.set_all_prices(self.conn, body.get("price"))
+        return 200, {"updated": n, "price": db.default_price(self.conn)}
+
+    def settings_get(self, q, body):
+        return 200, {"default_price": db.default_price(self.conn)}
 
     def stations_delete(self, q, body, sid):
         return (200, {"ok": True}) if db.delete_station(self.conn, int(sid)) else (404, {"error": "电站不存在"})

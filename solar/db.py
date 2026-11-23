@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS generation (
     note TEXT DEFAULT '',
     UNIQUE(station_id, day)
 );
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 -- 覆盖索引：统计查询直接从索引读取，不必回表
 CREATE INDEX IF NOT EXISTS idx_gen_day_cover ON generation(day, station_id, kwh);
 CREATE INDEX IF NOT EXISTS idx_gen_station_cover ON generation(station_id, day, kwh);
@@ -192,6 +193,38 @@ def update_station(conn, station_id, data):
         with conn:
             conn.execute(f"UPDATE stations SET {sets} WHERE id = ?", (*clean.values(), station_id))
     return get_station(conn, station_id)
+
+
+def get_setting(conn, key, default=None):
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def set_setting(conn, key, value):
+    with conn:
+        conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
+
+
+def default_price(conn):
+    try:
+        return float(get_setting(conn, "default_price", "") or 0.4)
+    except ValueError:
+        return 0.4
+
+
+def set_all_prices(conn, price):
+    """把所有电站设为同一电价，并作为以后新建/导入电站的默认电价。返回更新的电站数。"""
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        raise ValidationError("电价必须是数字")
+    if not (0 <= price < 100):
+        raise ValidationError("电价不合理")
+    with conn:
+        n = conn.execute("UPDATE stations SET price = ?", (price,)).rowcount
+    set_setting(conn, "default_price", price)
+    return n
 
 
 def delete_station(conn, station_id):

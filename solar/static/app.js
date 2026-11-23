@@ -76,7 +76,11 @@
 
   // ---------- 电站 ----------
   async function loadStations() {
-    state.stations = await api("/api/stations");
+    const [stations, settings] = await Promise.all([api("/api/stations"), api("/api/settings")]);
+    state.stations = stations;
+    state.defaultPrice = settings.default_price;
+    if (!$("#stationForm").elements.id.value) $("#stationForm").elements.price.value = state.defaultPrice;
+    if (document.activeElement !== $("#priceForm").elements.price) $("#priceForm").elements.price.value = state.defaultPrice;
     if (state.stationId && !state.stations.some(s => String(s.id) === String(state.stationId))) state.stationId = "";
     const sel = $("#stationSelect");
     sel.innerHTML = `<option value="">全部电站（${state.stations.length}）</option>` +
@@ -109,6 +113,7 @@
   function fillStationForm(s) {
     const f = $("#stationForm");
     f.reset();
+    if (!s) f.elements.price.value = state.defaultPrice ?? 0.4;
     for (const k of ["id", "name", "capacity_kwp", "price", "location", "commission_date", "notes", "goodwe_station_id"]) {
       if (s && s[k] != null) f.elements[k].value = s[k];
     }
@@ -416,6 +421,14 @@
       await refreshAll();
     });
     $("#stationCancel").onclick = () => fillStationForm(null);
+    $("#priceForm").onsubmit = guard(async e => {
+      e.preventDefault();
+      const price = e.target.elements.price.value;
+      if (!confirm(`把全部 ${state.stations.length} 座电站的电价设为 ${price} 元/kWh？以后导入的电站也会使用这个电价。`)) return;
+      const r = await api("/api/stations/price", { method: "POST", body: { price } });
+      toast(`已将 ${r.updated} 座电站电价设为 ${r.price} 元/kWh`);
+      await refreshAll();
+    });
     $("#stationsTable").onclick = guard(async e => {
       const edit = e.target.dataset.edit, del = e.target.dataset.del;
       if (edit) fillStationForm(state.stations.find(s => String(s.id) === edit));

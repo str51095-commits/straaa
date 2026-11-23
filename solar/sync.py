@@ -109,7 +109,7 @@ class GoodWeSync:
                     continue
                 db.create_station(self.conn, {"name": r.get("name") or r["id"], "capacity_kwp": r.get("capacity_kwp") or 0,
                                               "goodwe_station_id": r["id"],
-                                              "price": float(os.environ.get("SOLAR_DEFAULT_PRICE") or 0.4)})
+                                              "price": db.default_price(self.conn)})
                 created.append(r.get("name") or r["id"])
         return {"found": len(remote), "created": len(created), "already": linked, "names": created[:50]}
 

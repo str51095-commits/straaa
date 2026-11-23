@@ -199,3 +199,25 @@ class AuthUnitTest(unittest.TestCase):
             a.check_password("1.2.3.4", "bad")
         self.assertTrue(a.locked("1.2.3.4"))
         self.assertFalse(a.locked("5.6.7.8"))
+
+
+class PriceTest(unittest.TestCase):
+    def test_set_all_prices_and_default(self):
+        import threading
+        from solar.sync import GoodWeSync
+        conn = db.connect(":memory:")
+        a = db.create_station(conn, {"name": "A", "capacity_kwp": 10, "price": 0.4})
+        db.upsert_record(conn, a["id"], "2024-06-01", 100)
+        self.assertEqual(db.set_all_prices(conn, "0.2829"), 1)
+        self.assertEqual(db.summary(conn, None, today=date(2024, 6, 1))["total"]["revenue"], 28.29)
+        self.assertEqual(db.default_price(conn), 0.2829)
+        with self.assertRaises(db.ValidationError):
+            db.set_all_prices(conn, "abc")
+
+        class C:
+            def list_stations(self):
+                return [{"id": "g1", "name": "新站", "capacity_kwp": 50}]
+        s = GoodWeSync(conn, threading.Lock(), C())
+        s.discover()
+        new = [x for x in db.list_stations(conn) if x["goodwe_station_id"] == "g1"][0]
+        self.assertEqual(new["price"], 0.2829)  # 导入的电站使用统一电价

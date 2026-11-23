@@ -127,7 +127,7 @@
           <input type="hidden" name="id">
           <label>电站名称<input name="name" required placeholder="例如：家庭屋顶电站"></label>
           <label>装机容量 (kWp)<input type="number" name="capacity_kwp" step="0.01" min="0" required></label>
-          <label>上网电价 / 收益单价 (元/kWh)<input type="number" name="price" step="0.0001" min="0" value="0.4"></label>
+          <label>上网电价 / 收益单价 (元/kWh)<input type="number" name="price" step="0.0001" min="0" value=""></label>
           <label>地址<input name="location" placeholder="可选"></label>
           <label>并网日期<input type="date" name="commission_date"></label>
           <label>备注<input name="notes" placeholder="可选"></label>
@@ -142,6 +142,10 @@
       </div>
       <div class="card">
         <h2>我的电站</h2>
+        <form id="priceForm" class="price-form">
+          <label>统一电价（元/kWh）<input type="number" name="price" step="0.0001" min="0" required placeholder="例如 0.2829"></label>
+          <button class="btn" type="submit">应用到所有电站</button>
+        </form>
         <div class="table-scroll"><table id="stationsTable"></table></div>
       </div>
     </div>
