@@ -435,14 +435,15 @@
     pushplus: ["PushPlus Token", "微信搜索公众号「pushplus 推送加」关注并登录，完成实名认证后在「一对一推送」页复制 Token（微信渠道免费 200 条/天）。"],
     wecom: ["机器人 Webhook 地址或 key", "在企业微信群里点右上角「…」→「消息推送 / 群机器人」→ 添加机器人，复制 Webhook 地址粘贴到这里。完全免费，可多人一起接收。"],
     serverchan: ["SendKey", "登录 sct.ftqq.com 用微信扫码，复制 SendKey（免费版每天条数有限）。"],
-    wxpusher: ["appToken", "在 wxpusher.zjiecode.com 创建应用获取 appToken，扫码关注后得到自己的 UID。"],
+    wxpusher: ["SPT 推送码（以 SPT_ 开头）", "免费。打开 wxpusher.zjiecode.com 的「极简推送」页面，用微信扫码关注后得到以 SPT_ 开头的推送码，粘贴到这里。多人接收可填多个，用逗号分隔。（也支持 appToken + UID 方式）"],
   };
   function renderNotifyHelp() {
     const f = $("#notifyForm"), ch = f.elements.notify_channel.value;
     const [label, help] = NOTIFY_HELP[ch] || NOTIFY_HELP[""];
     $("#tokenLabel").textContent = label;
     $("#notifyHelp").textContent = help;
-    $("#uidsRow").classList.toggle("hidden", ch !== "wxpusher");
+    const tok = f.elements.notify_token.value.trim();
+    $("#uidsRow").classList.toggle("hidden", ch !== "wxpusher" || !tok || /^SPT_/i.test(tok));
   }
   async function loadNotify() {
     const c = await api("/api/notify"), f = $("#notifyForm");
@@ -536,6 +537,7 @@
     $("#nextBtn").onclick = step(1);
 
     $("#notifyForm").elements.notify_channel.onchange = renderNotifyHelp;
+    $("#notifyForm").elements.notify_token.oninput = renderNotifyHelp;
     $("#notifyForm").onsubmit = guard(async e => {
       e.preventDefault(); await saveNotify(); toast("通知设置已保存"); await loadNotify();
     });

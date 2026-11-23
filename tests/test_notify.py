@@ -57,6 +57,18 @@ class NotifyTest(unittest.TestCase):
             if ch == "wxpusher":
                 self.assertEqual(payload["uids"], ["UID_1", "UID_2"])
 
+    def test_wxpusher_simple_push(self):
+        notify.save_config(self.conn, {"notify_channel": "wxpusher", "notify_token": "SPT_abc", "notify_uids": ""})
+        fp = FakePost()
+        self.assertTrue(notify.send(self.conn, "标题", ["内容"], post=fp))
+        url, payload = fp.calls[0]
+        self.assertTrue(url.endswith("/api/send/message/simple-push"))
+        self.assertEqual(payload["spt"], "SPT_abc")
+        self.assertEqual(payload["contentType"], 3)
+        notify.save_config(self.conn, {"notify_token": "SPT_a, SPT_b"})
+        notify.send(self.conn, "标题", ["内容"], post=fp)
+        self.assertEqual(fp.calls[1][1]["sptList"], ["SPT_a", "SPT_b"])
+
     def test_send_error_recorded(self):
         with self.assertRaises(notify.NotifyError):
             notify.send(self.conn, "t", ["x"], post=FakePost({"code": 900, "msg": "用户未实名"}))

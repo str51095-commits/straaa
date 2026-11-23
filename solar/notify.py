@@ -18,7 +18,7 @@ CHANNELS = {
     "pushplus": "PushPlus 推送加（个人微信）",
     "wecom": "企业微信群机器人",
     "serverchan": "Server酱",
-    "wxpusher": "WxPusher",
+    "wxpusher": "WxPusher（免费，发到个人微信）",
 }
 DEFAULTS = {
     "notify_channel": "",
@@ -125,10 +125,18 @@ def send(conn, title, lines, post=http_post):
             r = post(f"https://sctapi.ftqq.com/{urllib.parse.quote(token)}.send", {"title": title[:32], "desp": md})
             if r.get("code") != 0:
                 raise NotifyError(f"Server酱: {r.get('message') or r}")
+        elif ch == "wxpusher" and token.upper().startswith("SPT_"):
+            # 极简推送：扫码关注即得 SPT，无需创建应用
+            spts = [t.strip() for t in token.replace("，", ",").split(",") if t.strip()]
+            r = post("https://wxpusher.zjiecode.com/api/send/message/simple-push",
+                     {"summary": title[:90], "content": f"## {title}\n{md}", "contentType": 3,
+                      **({"spt": spts[0]} if len(spts) == 1 else {"sptList": spts})})
+            if not r.get("success"):
+                raise NotifyError(f"WxPusher: {r.get('msg') or r}")
         elif ch == "wxpusher":
             uids = [u.strip() for u in cfg["notify_uids"].replace("，", ",").split(",") if u.strip()]
             if not uids:
-                raise NotifyError("WxPusher 需要填写 UID")
+                raise NotifyError("WxPusher 需要填写 UID（或改用以 SPT_ 开头的极简推送码）")
             r = post("https://wxpusher.zjiecode.com/api/send/message",
                      {"appToken": token, "summary": title[:90], "content": f"## {title}\n{md}",
                       "contentType": 3, "uids": uids})
