@@ -188,6 +188,26 @@ class NotifyTest(unittest.TestCase):
         finally:
             clock.today = orig
 
+    def test_mute_spd_by_default_and_toggle(self):
+        db.set_setting(self.conn, "alarm_baseline_done", "1")
+        monitor.upsert_alarms(self.conn, [alarm("s1", "g1", True, name="DC侧SPD故障"),
+                                          alarm("l1", "g2", True, name="漏电流传感器故障")])
+        title, lines = notify.collect_events(self.conn, {}, now_hm=600)
+        body = "\n".join(lines)
+        self.assertNotIn("SPD", body)
+        self.assertIn("漏电流传感器故障", body)
+        # SPD 恢复也不推送
+        monitor.upsert_alarms(self.conn, [alarm("s1", "g1", False, name="DC侧SPD故障")])
+        self.assertIsNone(notify.collect_events(self.conn, {}, now_hm=600))
+        # 新增屏蔽：漏电流
+        self.assertIn("漏电流传感器故障", notify.toggle_mute(self.conn, "漏电流传感器故障"))
+        monitor.upsert_alarms(self.conn, [alarm("l2", "g1", True, name="漏电流传感器故障")])
+        self.assertIsNone(notify.collect_events(self.conn, {}, now_hm=600))
+        # 取消屏蔽 SPD
+        self.assertNotIn("DC侧SPD故障", notify.toggle_mute(self.conn, "DC侧SPD故障", mute=False))
+        monitor.upsert_alarms(self.conn, [alarm("s2", "g1", True, name="DC侧SPD故障")])
+        self.assertIn("SPD", "\n".join(notify.collect_events(self.conn, {}, now_hm=600)[1]))
+
     def test_bad_time_rejected(self):
         with self.assertRaises(db.ValidationError):
             notify.save_config(self.conn, {"notify_daily_time": "25:00"})

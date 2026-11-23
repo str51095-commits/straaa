@@ -413,7 +413,9 @@
   }
 
   async function loadAlarms() {
-    const rows = await api(`/api/alarms?active=${state.alarmActive}&${sidQuery()}`);
+    const [rows, nc] = await Promise.all([api(`/api/alarms?active=${state.alarmActive}&${sidQuery()}`), api("/api/notify")]);
+    const muteList = (nc.notify_mute || "").split(/[\n,，]/).map(x => x.trim()).filter(Boolean);
+    const muted = a => muteList.some(k => (a.name || "").includes(k) || k === a.code);
     const lvl = l => /_Fault$/i.test(l || "") ? ["fault", "故障"] : /_alarm$/i.test(l || "") ? ["alarm", "告警"] : /_Prompt$/i.test(l || "") ? ["prompt", "提示"] : ["", l || ""];
     $("#alarmList").innerHTML = rows.length ? rows.map(a => {
       const [lk, ll] = lvl(a.level);
@@ -421,6 +423,8 @@
         <div class="t">${a.active ? `<span class="tag ${lk === "fault" ? "crit" : "warn"}">${esc(ll || "告警")} · 进行中</span>` : `<span class="tag" style="color:var(--muted)">已恢复</span>`}${esc(a.name || a.code || "未知告警")}</div>
         <div class="m">${esc(a.station || "")}${a.device_name || a.device_sn ? ` · ${esc(a.device_name || "")} ${esc(a.device_sn || "")}` : ""}${a.code ? ` · 代码 ${esc(a.code)}` : ""}</div>
         <div class="m">发生 ${esc(a.happened || "—")}${a.recovered ? ` · 恢复 ${esc(a.recovered)}` : ""}</div>
+        <div class="m">${muted(a) ? `<span class="tag" style="color:var(--muted)">不推送</span> <button class="linkbtn" data-unmute="${esc(a.name)}">恢复推送</button>`
+          : a.name ? `<button class="linkbtn" data-mute="${esc(a.name)}">不推送此类告警</button>` : ""}</div>
       </div>`;
     }).join("") : `<p class="hint">${state.alarmActive === "1" ? "当前没有进行中的告警" : "暂无告警记录"}</p>`;
   }
@@ -446,6 +450,7 @@
     f.elements.notify_token.value = "";
     f.elements.notify_token.placeholder = c.token_set ? `已保存（${c.token_hint}），不修改请留空` : "粘贴 Token";
     f.elements.notify_uids.value = c.notify_uids || "";
+    f.elements.notify_mute.value = c.notify_mute || "";
     for (const k of ["notify_alarm", "notify_recovery", "notify_status", "notify_daily"]) f.elements[k].checked = c[k] === "1";
     for (const k of ["notify_daily_time", "notify_day_start", "notify_day_end"]) f.elements[k].value = c[k];
     $("#notifyLast").textContent = c.last_result ? "最近一次：" + c.last_result.replace("T", " ") : "";
@@ -453,7 +458,7 @@
   }
   async function saveNotify() {
     const f = $("#notifyForm"), body = {};
-    for (const k of ["notify_channel", "notify_token", "notify_uids", "notify_daily_time", "notify_day_start", "notify_day_end"]) body[k] = f.elements[k].value;
+    for (const k of ["notify_channel", "notify_token", "notify_uids", "notify_mute", "notify_daily_time", "notify_day_start", "notify_day_end"]) body[k] = f.elements[k].value;
     for (const k of ["notify_alarm", "notify_recovery", "notify_status", "notify_daily"]) body[k] = f.elements[k].checked;
     await api("/api/notify", { method: "PUT", body });
   }
@@ -558,6 +563,15 @@
       showView("dashboard");
       await Promise.all([loadSummary(), loadChart()]);
       scrollTo({ top: 0 });
+    });
+    $("#alarmList").onclick = guard(async e => {
+      const name = e.target.dataset.mute || e.target.dataset.unmute;
+      if (!name) return;
+      const mute = !!e.target.dataset.mute;
+      if (mute && !confirm(`以后「${name}」类告警不再推送到微信（仍会记录在告警页）？`)) return;
+      await api("/api/notify/mute", { method: "POST", body: { name, mute } });
+      toast(mute ? `已设置：「${name}」不再推送` : `已恢复推送「${name}」`);
+      await loadAlarms();
     });
     $$("#alarmSeg button").forEach(b => b.onclick = guard(async () => {
       $$("#alarmSeg button").forEach(x => x.classList.toggle("active", x === b));

@@ -31,6 +31,7 @@ DEFAULTS = {
     "notify_daily_time": "20:00",
     "notify_day_start": "08:00",  # 只在白天提醒离线（夜间逆变器休眠属正常）
     "notify_day_end": "18:00",
+    "notify_mute": "DC侧SPD故障",  # 不推送的告警关键词，每行一个（仍会记录在告警中心）
 }
 MAX_LINES = 30
 STALE_HOURS = 6
@@ -142,6 +143,25 @@ def send(conn, title, lines, post=http_post):
 
 # ---------- 事件检测（同步后调用） ----------
 
+def mute_keywords(cfg):
+    raw = cfg.get("notify_mute") or ""
+    return [k.strip() for k in raw.replace("，", "\n").replace(",", "\n").splitlines() if k.strip()]
+
+
+def toggle_mute(conn, name, mute=True):
+    """把某类告警加入 / 移出不推送列表。"""
+    name = (name or "").strip()
+    if not name:
+        raise db.ValidationError("告警名称不能为空")
+    keys = mute_keywords(get_config(conn))
+    if mute and name not in keys:
+        keys.append(name)
+    if not mute:
+        keys = [k for k in keys if k != name]
+    db.set_setting(conn, "notify_mute", "\n".join(keys))
+    return keys
+
+
 def _shift_iso(iso, hours):
     from datetime import datetime, timedelta
     return (datetime.fromisoformat(iso) + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -167,9 +187,19 @@ def collect_events(conn, prev_status, now_hm=None):
     lines = []
     n_alarm = n_status = 0
 
+    # 屏蔽的告警：标记为已通知，后续不推送（包括恢复）
+    mute = mute_keywords(cfg)
+    if mute:
+        muted = [r["id"] for r in conn.execute(
+            "SELECT id, name, code FROM alarms WHERE notified = 0 OR notified_recovery = 0")
+            if any(k in (r["name"] or "") or k == (r["code"] or "") for k in mute)]
+        with conn:
+            conn.executemany("UPDATE alarms SET notified = 1, notified_recovery = 1 WHERE id = ?",
+                             [(i,) for i in muted])
+
     # 首次启用：把已有告警标记为已通知，只发一条汇总，避免刷屏
     if db.get_setting(conn, "alarm_baseline_done") != "1":
-        active = conn.execute("SELECT COUNT(*) FROM alarms WHERE active = 1").fetchone()[0]
+        active = conn.execute("SELECT COUNT(*) FROM alarms WHERE active = 1 AND notified = 0").fetchone()[0]
         with conn:
             conn.execute("UPDATE alarms SET notified = 1, notified_recovery = CASE WHEN active = 0 THEN 1 ELSE 0 END")
         db.set_setting(conn, "alarm_baseline_done", "1")

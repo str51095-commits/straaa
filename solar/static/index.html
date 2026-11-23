@@ -218,6 +218,9 @@
           <label><input type="checkbox" name="notify_status"> 电站故障、白天离线（其他电站正常发电时），以及恢复正常</label>
           <label><input type="checkbox" name="notify_daily"> 每日发电日报，发送时间 <input type="time" name="notify_daily_time" class="inline-time"></label>
         </fieldset>
+        <label>不推送的告警（每行一个关键词，告警名称包含即不推送；仍会记录在「告警」页）
+          <textarea name="notify_mute" rows="3" placeholder="例如：DC侧SPD故障"></textarea>
+        </label>
         <label>白天时段（3 座以上电站时自动按“大部分电站在发电”判断白天；电站少于 3 座时按此时段提醒离线）
           <span class="row-gap"><input type="time" name="notify_day_start" class="inline-time"> 至 <input type="time" name="notify_day_end" class="inline-time"></span>
         </label>

@@ -51,6 +51,7 @@ class App:
             ("GET", r"/api/notify", self.notify_get),
             ("PUT", r"/api/notify", self.notify_put),
             ("POST", r"/api/notify/test", self.sync_notify_test),
+            ("POST", r"/api/notify/mute", self.notify_mute),
             ("GET", r"/api/sync/status", self.sync_status),
             ("POST", r"/api/sync/run", self.sync_run),
             ("POST", r"/api/sync/discover", self.sync_discover),
@@ -135,6 +136,9 @@ class App:
 
     def notify_get(self, q, body):
         return 200, notify.public_config(self.conn)
+
+    def notify_mute(self, q, body):
+        return 200, {"mute": notify.toggle_mute(self.conn, body.get("name"), body.get("mute", True) is not False)}
 
     def notify_put(self, q, body):
         return 200, notify.save_config(self.conn, body)
