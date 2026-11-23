@@ -442,6 +442,7 @@ def summary(conn, station_id=None, today=None):
         "today": (today, today),
         "yesterday": (yesterday, yesterday),
         "month": (date(y, m, 1), _month_end(y, m)),
+        "last_month": (date(y - (m == 1), (m - 2) % 12 + 1, 1), date(y, m, 1) - timedelta(days=1)),
         "year": (date(y, 1, 1), date(y, 12, 31)),
         "last_year": (date(y - 1, 1, 1), date(y - 1, 12, 31)),
         "total": (date(1000, 1, 1), date(9999, 12, 31)),

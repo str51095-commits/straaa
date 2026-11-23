@@ -152,11 +152,32 @@
       tile("今日发电", s.today.kwh, (s.today.days ? hrs(s.today.hours) : "今日未录入") + (s.today.days ? delta(s.today.kwh, s.yesterday.kwh) : "")) +
       tile("本月发电", s.month.kwh, `${hrs(s.month.hours)} · ${money(s.month.revenue)}`) +
       tile("本年发电", s.year.kwh, `${hrs(s.year.hours)} · ${money(s.year.revenue)}`) +
-      tile("累计发电", s.total.kwh, `${s.total.days} 天 · ${money(s.total.revenue)}`) +
+      tile("累计发电", s.total.kwh, `${s.total.days} 天有数据`);
+    $("#kpisMinor").innerHTML =
       `<div class="kpi minor"><div class="label">装机容量</div><div class="value">${nf(s.capacity_kwp, 2)}<small>kWp</small></div><div class="sub">${state.stationId ? "当前电站" : `${state.stations.length} 座电站合计`}</div></div>` +
       `<div class="kpi minor"><div class="label">CO₂ 减排</div><div class="value">${co2}<small>${co2u}</small></div><div class="sub">约等于种树 ${nf(s.trees, 0)} 棵/年</div></div>` +
       `<div class="kpi minor"><div class="label">节约标准煤</div><div class="value">${coal}<small>${coalu}</small></div><div class="sub">按 0.3 kg/kWh 折算</div></div>` +
       `<div class="kpi minor"><div class="label">单日最高</div><div class="value">${s.best_day ? energy(s.best_day.kwh).join("<small>") + "</small>" : "—"}</div><div class="sub">${s.best_day ? s.best_day.day : "暂无数据"}</div></div>`;
+    renderRevenue(s);
+  }
+
+  function renderRevenue(s) {
+    const [y, m] = s.date.split("-").map(Number);
+    const daysSoFar = Number(s.date.slice(8));
+    const lm = m === 1 ? 12 : m - 1;
+    const yen = v => {
+      const n = Number(v) || 0;
+      return n >= 1e6 ? [nf(n / 1e4, 1), "万"] : [nf(n, n >= 1e4 ? 0 : 2), ""];
+    };
+    const tile = (label, v, sub) => {
+      const [a, u] = yen(v);
+      return `<div class="kpi"><div class="label">${label}</div><div class="value">¥${a}<small>${u}</small></div><div class="sub">${sub}</div></div>`;
+    };
+    $("#revenue").innerHTML =
+      tile(`本月收益（${m}月）`, s.month.revenue, `日均 ¥${nf(s.month.revenue / Math.max(1, daysSoFar), 2)} · 今日 ¥${nf(s.today.revenue, 2)}`) +
+      tile(`上月收益（${lm}月）`, s.last_month.revenue, `发电 ${energyStr(s.last_month.kwh)}`) +
+      tile(`本年收益（${y}年）`, s.year.revenue, `发电 ${energyStr(s.year.kwh)}` + (s.last_year.revenue ? ` · 去年全年 ¥${nf(s.last_year.revenue, 0)}` : "")) +
+      tile("累计收益", s.total.revenue, `发电 ${energyStr(s.total.kwh)} · 按各电站电价计算`);
   }
 
   async function loadChart() {

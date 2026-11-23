@@ -221,3 +221,21 @@ class PriceTest(unittest.TestCase):
         s.discover()
         new = [x for x in db.list_stations(conn) if x["goodwe_station_id"] == "g1"][0]
         self.assertEqual(new["price"], 0.2829)  # 导入的电站使用统一电价
+
+
+class RevenuePeriodsTest(unittest.TestCase):
+    def test_last_month_including_january(self):
+        conn = db.connect(":memory:")
+        a = db.create_station(conn, {"name": "A", "capacity_kwp": 10, "price": 0.2829})
+        b = db.create_station(conn, {"name": "B", "capacity_kwp": 10, "price": 0.5})
+        db.upsert_record(conn, a["id"], "2025-12-31", 100)
+        db.upsert_record(conn, b["id"], "2025-12-01", 10)
+        db.upsert_record(conn, a["id"], "2026-01-05", 200)
+        s = db.summary(conn, None, today=date(2026, 1, 10))
+        self.assertEqual(s["last_month"]["kwh"], 110)
+        self.assertEqual(s["last_month"]["revenue"], 33.29)   # 100*0.2829 + 10*0.5
+        self.assertEqual(s["month"]["revenue"], 56.58)
+        self.assertEqual(s["year"]["revenue"], 56.58)
+        self.assertEqual(s["total"]["revenue"], 89.87)
+        s = db.summary(conn, None, today=date(2026, 3, 1))
+        self.assertEqual(s["last_month"]["kwh"], 0)

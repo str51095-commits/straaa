@@ -80,6 +80,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 24px 48px; }
 .kpi .value small { font-size: 13px; font-weight: 500; color: var(--text-2); margin-left: 3px; }
 .kpi .sub { color: var(--text-3); font-size: 12px; }
 .kpi.minor .value { font-size: 20px; }
+.kpis.revenue .kpi { border-top: 3px solid var(--accent); }
 .delta-up { color: var(--good); }
 .delta-down { color: var(--danger); }
 

@@ -334,6 +334,9 @@ def daily_report(conn):
         lines.append(f"发电偏低：**{sm['low_eff']}** 座（等效小时低于中位数 {sm['median_hours']} h 的 60%，下方标 ⬇）")
     month_total = sum(r["month_kwh"] or 0 for r in rows)
     lines.append(f"本月累计：{month_total:,.1f} kWh")
+    s = db.summary(conn, None)
+    lines.append(f"收益：今日 **¥{s['today']['revenue']:,.2f}**，本月 ¥{s['month']['revenue']:,.2f}，"
+                 f"上月 ¥{s['last_month']['revenue']:,.2f}，本年 ¥{s['year']['revenue']:,.2f}")
 
     # 每座电站明细：按今日发电量从高到低
     lines.append("\n**各电站今日发电**（今日 kWh · 等效 h · 本月 kWh）：")
