@@ -231,3 +231,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); o
   .mon-list { grid-template-columns: minmax(0, 1fr); }
   .mon-card .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 }
+
+.notify-form { max-width: 560px; }
+.checks { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 10px; margin: 0; display: grid; gap: 6px; }
+.checks legend { color: var(--text-2); font-size: 13px; padding: 0 4px; }
+.checks label { display: flex !important; align-items: center; gap: 8px; color: var(--text) !important; flex-wrap: wrap; }
+.checks input[type=checkbox] { width: 18px; height: 18px; flex: none; }
+.inline-time { width: auto !important; padding: 4px 6px; }
+#view-stations > .card { margin-top: 16px; }

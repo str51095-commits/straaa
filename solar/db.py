@@ -131,6 +131,11 @@ def _migrate(conn):
         for col, typ in added.items():
             if col not in cols:
                 conn.execute(f"ALTER TABLE stations ADD COLUMN {col} {typ}")
+    acols = {r["name"] for r in conn.execute("PRAGMA table_info(alarms)")}
+    with conn:
+        for col in ("notified", "notified_recovery"):  # 微信通知是否已发送
+            if col not in acols:
+                conn.execute(f"ALTER TABLE alarms ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
 
 
 def _parse_day(value):

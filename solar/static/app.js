@@ -75,6 +75,7 @@
     $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === name));
     $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
     if (name === "entry") { loadRecords(); loadSync().catch(() => {}); }
+    if (name === "stations") loadNotify().catch(e => toast(e.message, true));
     if (name === "monitor") loadMonitor().catch(e => toast(e.message, true));
     if (name === "alarms") loadAlarms().catch(e => toast(e.message, true));
   }
@@ -424,6 +425,39 @@
     }).join("") : `<p class="hint">${state.alarmActive === "1" ? "当前没有进行中的告警" : "暂无告警记录"}</p>`;
   }
 
+  // ---------- 微信通知 ----------
+  const NOTIFY_HELP = {
+    "": ["Token", "选择推送方式后，告警和日报会推送到微信。"],
+    pushplus: ["PushPlus Token", "微信搜索公众号「pushplus 推送加」关注并登录，完成实名认证后在「一对一推送」页复制 Token（微信渠道免费 200 条/天）。"],
+    wecom: ["机器人 Webhook 地址或 key", "在企业微信群里点右上角「…」→「消息推送 / 群机器人」→ 添加机器人，复制 Webhook 地址粘贴到这里。完全免费，可多人一起接收。"],
+    serverchan: ["SendKey", "登录 sct.ftqq.com 用微信扫码，复制 SendKey（免费版每天条数有限）。"],
+    wxpusher: ["appToken", "在 wxpusher.zjiecode.com 创建应用获取 appToken，扫码关注后得到自己的 UID。"],
+  };
+  function renderNotifyHelp() {
+    const f = $("#notifyForm"), ch = f.elements.notify_channel.value;
+    const [label, help] = NOTIFY_HELP[ch] || NOTIFY_HELP[""];
+    $("#tokenLabel").textContent = label;
+    $("#notifyHelp").textContent = help;
+    $("#uidsRow").classList.toggle("hidden", ch !== "wxpusher");
+  }
+  async function loadNotify() {
+    const c = await api("/api/notify"), f = $("#notifyForm");
+    f.elements.notify_channel.value = c.notify_channel || "";
+    f.elements.notify_token.value = "";
+    f.elements.notify_token.placeholder = c.token_set ? `已保存（${c.token_hint}），不修改请留空` : "粘贴 Token";
+    f.elements.notify_uids.value = c.notify_uids || "";
+    for (const k of ["notify_alarm", "notify_recovery", "notify_status", "notify_daily"]) f.elements[k].checked = c[k] === "1";
+    for (const k of ["notify_daily_time", "notify_day_start", "notify_day_end"]) f.elements[k].value = c[k];
+    $("#notifyLast").textContent = c.last_result ? "最近一次：" + c.last_result.replace("T", " ") : "";
+    renderNotifyHelp();
+  }
+  async function saveNotify() {
+    const f = $("#notifyForm"), body = {};
+    for (const k of ["notify_channel", "notify_token", "notify_uids", "notify_daily_time", "notify_day_start", "notify_day_end"]) body[k] = f.elements[k].value;
+    for (const k of ["notify_alarm", "notify_recovery", "notify_status", "notify_daily"]) body[k] = f.elements[k].checked;
+    await api("/api/notify", { method: "PUT", body });
+  }
+
   // ---------- 固德威同步 ----------
   function renderSync(st) {
     const msg = $("#syncMsg");
@@ -495,6 +529,19 @@
     });
     $("#prevBtn").onclick = step(-1);
     $("#nextBtn").onclick = step(1);
+
+    $("#notifyForm").elements.notify_channel.onchange = renderNotifyHelp;
+    $("#notifyForm").onsubmit = guard(async e => {
+      e.preventDefault(); await saveNotify(); toast("通知设置已保存"); await loadNotify();
+    });
+    const notifySend = kind => guard(async () => {
+      await saveNotify();
+      await api("/api/notify/test", { method: "POST", body: { kind } });
+      toast(kind === "daily" ? "日报已发送，请查看微信" : "测试消息已发送，请查看微信");
+      await loadNotify();
+    });
+    $("#notifyTest").onclick = notifySend("test");
+    $("#notifyDaily").onclick = notifySend("daily");
 
     $("#monChips").onclick = e => {
       const b = e.target.closest(".chip"); if (!b) return;

@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import clock, db, monitor
+from . import clock, db, monitor, notify
 from .auth import COOKIE, SESSION_DAYS, Auth, parse_cookies
 from .goodwe import GoodWeError
 from .sync import GoodWeSync
@@ -48,6 +48,9 @@ class App:
             ("GET", r"/api/monitor", self.monitor_overview),
             ("GET", r"/api/alarms", self.alarms_list),
             ("GET", r"/api/export/report", self.export_report),
+            ("GET", r"/api/notify", self.notify_get),
+            ("PUT", r"/api/notify", self.notify_put),
+            ("POST", r"/api/notify/test", self.sync_notify_test),
             ("GET", r"/api/sync/status", self.sync_status),
             ("POST", r"/api/sync/run", self.sync_run),
             ("POST", r"/api/sync/discover", self.sync_discover),
@@ -129,6 +132,28 @@ class App:
         if not re.fullmatch(r"\d{4}(-\d{2})?", period):
             raise db.ValidationError("报表周期格式应为 YYYY-MM 或 YYYY")
         return 200, ("text/csv; charset=utf-8", monitor.report_csv(self.conn, period), f"report-{period}.csv")
+
+    def notify_get(self, q, body):
+        return 200, notify.public_config(self.conn)
+
+    def notify_put(self, q, body):
+        return 200, notify.save_config(self.conn, body)
+
+    def sync_notify_test(self, q, body):  # 以 sync_ 开头：访问外网，不长时间占用全局锁
+        kind = body.get("kind") or "test"
+        with self.lock:
+            if kind == "daily":
+                title, lines = notify.daily_report(self.conn)
+            else:
+                title, lines = "光伏平台测试消息", ["如果你在微信里看到这条消息，说明通知已设置成功 ✅",
+                                                f"时间：{clock.now_iso().replace('T', ' ')}"]
+            try:
+                sent = notify.send(self.conn, title, lines)
+            except notify.NotifyError as e:
+                return 502, {"error": str(e)}
+        if not sent:
+            raise db.ValidationError("请先选择推送方式并填写 Token")
+        return 200, {"ok": True}
 
     def sync_status(self, q, body):
         return 200, self.sync.status

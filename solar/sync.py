@@ -3,7 +3,7 @@ import os
 import threading
 from datetime import date
 
-from . import clock, db, monitor
+from . import clock, db, monitor, notify
 from .goodwe import DEFAULT_LOGIN_URL, GoodWeClient, GoodWeError
 
 SYNC_NOTE = "固德威自动同步"
@@ -35,6 +35,7 @@ class GoodWeSync:
                        "can_backfill": hasattr(client, "daily_history")}
         self._run_lock = threading.Lock()
         self._stop = threading.Event()
+        self.notify_post = notify.http_post
 
     @classmethod
     def from_env(cls, conn, lock):
@@ -57,6 +58,7 @@ class GoodWeSync:
         try:
             today = today or clock.today()
             stations = self._linked_stations()
+            prev_status = {s["id"]: s.get("status") for s in stations}
             results = []
             extra_errors = []
             # 电站运行状态（一次请求拿到所有电站）
@@ -99,6 +101,16 @@ class GoodWeSync:
                         monitor.upsert_alarms(self.conn, alarms)
                 except GoodWeError as e:
                     extra_errors.append(f"读取告警失败: {e}")
+            # 微信通知
+            if stations and not self.status["paused"]:
+                try:
+                    with self.lock:
+                        ev = notify.collect_events(self.conn, prev_status)
+                        if ev:
+                            notify.send(self.conn, *ev, post=self.notify_post)
+                        notify.maybe_send_daily(self.conn, post=self.notify_post)
+                except (notify.NotifyError, db.ValidationError) as e:
+                    extra_errors.append(f"微信通知失败: {e}")
             self.status["extra_errors"] = extra_errors
             failed = [r for r in results if not r["ok"]]
             if self.status["paused"]:

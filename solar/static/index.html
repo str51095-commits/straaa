@@ -194,6 +194,41 @@
         <div class="table-scroll"><table id="stationsTable"></table></div>
       </div>
     </div>
+    <div class="card" id="notifyCard">
+      <h2>微信通知</h2>
+      <form id="notifyForm" class="form notify-form">
+        <label>推送方式
+          <select name="notify_channel">
+            <option value="">不推送</option>
+            <option value="pushplus">PushPlus 推送加（发到个人微信）</option>
+            <option value="wecom">企业微信群机器人（发到企业微信群）</option>
+            <option value="serverchan">Server酱</option>
+            <option value="wxpusher">WxPusher</option>
+          </select>
+        </label>
+        <p class="hint" id="notifyHelp"></p>
+        <label><span id="tokenLabel">Token</span>
+          <input name="notify_token" autocomplete="off" placeholder="">
+        </label>
+        <label class="hidden" id="uidsRow">接收人 UID（多个用逗号分隔）<input name="notify_uids" placeholder="UID_xxx"></label>
+        <fieldset class="checks">
+          <legend>通知内容</legend>
+          <label><input type="checkbox" name="notify_alarm"> 新告警（固德威上报的设备故障/告警）</label>
+          <label><input type="checkbox" name="notify_recovery"> 告警恢复</label>
+          <label><input type="checkbox" name="notify_status"> 电站变为故障 / 离线，以及恢复正常</label>
+          <label><input type="checkbox" name="notify_daily"> 每日发电日报，发送时间 <input type="time" name="notify_daily_time" class="inline-time"></label>
+        </fieldset>
+        <label>离线提醒时段（夜间逆变器休眠属正常，不提醒）
+          <span class="row-gap"><input type="time" name="notify_day_start" class="inline-time"> 至 <input type="time" name="notify_day_end" class="inline-time"></span>
+        </label>
+        <div class="row-gap">
+          <button class="btn primary" type="submit">保存</button>
+          <button class="btn" type="button" id="notifyTest">发送测试消息</button>
+          <button class="btn" type="button" id="notifyDaily">立即发送今日日报</button>
+        </div>
+        <p class="hint" id="notifyLast"></p>
+      </form>
+    </div>
   </section>
 </main>
 
