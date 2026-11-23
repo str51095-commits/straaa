@@ -34,6 +34,23 @@ CREATE TABLE IF NOT EXISTS generation (
     UNIQUE(station_id, day)
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS alarms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    warning_id TEXT NOT NULL UNIQUE,
+    goodwe_station_id TEXT DEFAULT '',
+    station_name TEXT DEFAULT '',
+    device_sn TEXT DEFAULT '',
+    device_name TEXT DEFAULT '',
+    code TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    level TEXT DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 0,
+    happened TEXT DEFAULT '',
+    recovered TEXT DEFAULT '',
+    updated TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_alarms_station ON alarms(goodwe_station_id, active);
+CREATE INDEX IF NOT EXISTS idx_alarms_happened ON alarms(happened);
 -- 覆盖索引：统计查询直接从索引读取，不必回表
 CREATE INDEX IF NOT EXISTS idx_gen_day_cover ON generation(day, station_id, kwh);
 CREATE INDEX IF NOT EXISTS idx_gen_station_cover ON generation(station_id, day, kwh);
@@ -106,9 +123,14 @@ def _migrate(conn):
     with conn:
         conn.execute("DROP INDEX IF EXISTS idx_generation_day")
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(stations)")}
-    if "goodwe_station_id" not in cols:
-        with conn:
-            conn.execute("ALTER TABLE stations ADD COLUMN goodwe_station_id TEXT DEFAULT ''")
+    added = {"goodwe_station_id": "TEXT DEFAULT ''",
+             "status": "INTEGER",          # 云平台运行状态码（见 monitor.STATUS）
+             "power_w": "REAL",            # 最近一次同步的实时功率
+             "status_time": "TEXT"}        # 最近一次同步时间
+    with conn:
+        for col, typ in added.items():
+            if col not in cols:
+                conn.execute(f"ALTER TABLE stations ADD COLUMN {col} {typ}")
 
 
 def _parse_day(value):

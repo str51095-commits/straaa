@@ -180,7 +180,8 @@ class SemsPlusClient:
             rows = data.get("dataList") or data.get("records") or []
             for r in rows:
                 out.append({"id": r.get("id") or r.get("stationId"), "name": r.get("name") or r.get("stationName"),
-                            "capacity_kwp": _num(r.get("installedPower") or r.get("capacity"))})
+                            "capacity_kwp": _num(r.get("installedPower") or r.get("capacity")),
+                            "status": _int(r.get("status"))})
             total = int(data.get("total") or 0)
             if not rows or len(out) >= total:
                 break
@@ -217,6 +218,34 @@ class SemsPlusClient:
             cur = year_end + timedelta(days=1)
         return result
 
+    def alarms(self, station_ids, max_pages=5, page_size=100):
+        """最近的告警（含已恢复），按页读取。返回统一字段的列表。"""
+        out = []
+        ids = list(station_ids)
+        for i in range(0, len(ids), 50):  # 每次最多 50 座电站
+            chunk = ids[i:i + 50]
+            for page in range(1, max_pages + 1):
+                data = self._call("POST", "/sems-alarm/api/v2/alarm/page",
+                                  {"pageIndex": page, "pageSize": page_size, "stationIds": chunk}) or {}
+                rows = data.get("dataList") or []
+                for r in rows:
+                    out.append({
+                        "id": r.get("warningid") or r.get("id"),
+                        "station_id": r.get("stationId"),
+                        "station_name": r.get("stationname"),
+                        "device_sn": r.get("devicesn"),
+                        "device_name": r.get("deviceName"),
+                        "code": r.get("warning_code") or r.get("error_code"),
+                        "name": r.get("warningNameZh") or r.get("warningNameEn") or r.get("warningname"),
+                        "level": r.get("alarmLevel"),
+                        "active": str(r.get("status")) == "0",
+                        "happened": r.get("happentimes") or _ms_to_str(r.get("happentime")),
+                        "recovered": r.get("recoverytimes") or _ms_to_str(r.get("recoverytime")),
+                    })
+                if len(rows) < page_size or page * page_size >= int(data.get("total") or 0):
+                    break
+        return out
+
     def current_power_w(self, station_id):
         data = self._call("GET", "/sems-plant/api/stations/flow", params={"stationId": station_id}) or {}
         kw = _num(data.get("pSystem") if data.get("pSystem") is not None else data.get("pAc"))
@@ -247,6 +276,21 @@ def _num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _int(v):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+def _ms_to_str(v):
+    try:
+        from datetime import datetime
+        return datetime.fromtimestamp(int(v) / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OSError):
+        return ""
 
 
 def _norm_date(raw, start, dimension):

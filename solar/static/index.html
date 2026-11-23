@@ -22,6 +22,8 @@
 
 <nav class="tabs" role="tablist">
   <button class="tab active" data-view="dashboard">概览</button>
+  <button class="tab" data-view="monitor">电站监控</button>
+  <button class="tab" data-view="alarms">告警<span class="tab-badge hidden" id="alarmBadge"></span></button>
   <button class="tab" data-view="entry">数据录入</button>
   <button class="tab" data-view="stations">电站管理</button>
 </nav>
@@ -38,6 +40,7 @@
       </div>
     </div>
 
+    <button class="status-strip hidden" id="statusStrip" data-goto="monitor"></button>
     <div class="kpis" id="kpis"></div>
 
     <div class="card">
@@ -62,6 +65,41 @@
         <summary>查看数据表</summary>
         <div class="table-scroll"><table id="periodTable"></table></div>
       </details>
+    </div>
+  </section>
+
+  <!-- 电站监控 -->
+  <section id="view-monitor" class="view">
+    <div class="mon-totals" id="monTotals"></div>
+    <div class="chips" id="monChips"></div>
+    <div class="mon-ctrl">
+      <input type="search" id="monSearch" placeholder="搜索电站名称 / 地址">
+      <select id="monSort">
+        <option value="status">按状态</option>
+        <option value="today_hours">按今日等效小时</option>
+        <option value="today_kwh">按今日发电量</option>
+        <option value="power_w">按实时功率</option>
+        <option value="month_kwh">按本月发电量</option>
+        <option value="active_alarms">按告警数</option>
+        <option value="name">按名称</option>
+      </select>
+    </div>
+    <p class="hint" id="monHint"></p>
+    <div class="mon-list" id="monList"></div>
+  </section>
+
+  <!-- 告警 -->
+  <section id="view-alarms" class="view">
+    <div class="card">
+      <div class="card-head">
+        <h2>告警中心</h2>
+        <div class="seg" id="alarmSeg">
+          <button class="active" data-active="1">进行中</button>
+          <button data-active="0">全部</button>
+        </div>
+      </div>
+      <p class="hint">告警来自固德威云平台，每次同步时更新。</p>
+      <div class="alarm-list" id="alarmList"></div>
     </div>
   </section>
 
@@ -90,8 +128,15 @@
           <button class="btn primary" type="submit">导入</button>
         </form>
         <div class="row-gap" style="margin-top:12px">
-          <a class="btn" id="exportLink" href="/api/export">导出 CSV（当前电站）</a>
+          <a class="btn" id="exportLink" href="/api/export">导出明细 CSV（当前电站）</a>
         </div>
+        <h3 class="sub-h">电站报表</h3>
+        <div class="row-gap report-row">
+          <input type="month" id="reportMonth">
+          <a class="btn" id="reportMonthLink" href="#">导出月报</a>
+          <a class="btn" id="reportYearLink" href="#">导出年报</a>
+        </div>
+        <p class="hint">每座电站的发电量、等效利用小时、收益和减排量，Excel 可直接打开。</p>
       </div>
     </div>
     <div class="card" id="syncCard">

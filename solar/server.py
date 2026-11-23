@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db
+from . import clock, db, monitor
 from .auth import COOKIE, SESSION_DAYS, Auth, parse_cookies
 from .goodwe import GoodWeError
 from .sync import GoodWeSync
@@ -45,6 +45,9 @@ class App:
             ("GET", r"/api/stats/monthly", self.stats_monthly),
             ("GET", r"/api/stats/yearly", self.stats_yearly),
             ("POST", r"/api/demo", self.demo),
+            ("GET", r"/api/monitor", self.monitor_overview),
+            ("GET", r"/api/alarms", self.alarms_list),
+            ("GET", r"/api/export/report", self.export_report),
             ("GET", r"/api/sync/status", self.sync_status),
             ("POST", r"/api/sync/run", self.sync_run),
             ("POST", r"/api/sync/discover", self.sync_discover),
@@ -109,6 +112,23 @@ class App:
 
     def demo(self, q, body):
         return 201, db.generate_demo(self.conn)
+
+    def monitor_overview(self, q, body):
+        return 200, monitor.overview(self.conn)
+
+    def alarms_list(self, q, body):
+        sid = _sid(q)
+        gid = None
+        if sid:
+            st = db.get_station(self.conn, sid)
+            gid = (st or {}).get("goodwe_station_id") or "-"
+        return 200, monitor.list_alarms(self.conn, q.get("active") == "1", gid, min(int(q.get("limit") or 200), 1000))
+
+    def export_report(self, q, body):
+        period = q.get("period") or clock.today().strftime("%Y-%m")
+        if not re.fullmatch(r"\d{4}(-\d{2})?", period):
+            raise db.ValidationError("报表周期格式应为 YYYY-MM 或 YYYY")
+        return 200, ("text/csv; charset=utf-8", monitor.report_csv(self.conn, period), f"report-{period}.csv")
 
     def sync_status(self, q, body):
         return 200, self.sync.status

@@ -23,6 +23,7 @@ class FakeSemsPlus:
         self.stations = stations or []
         self.expire_once = expire_once
         self.calls = []
+        self.alarm_rows = []
 
     def __call__(self, method, url, body, headers, timeout):
         self.calls.append((method, url, body))
@@ -56,6 +57,9 @@ class FakeSemsPlus:
                 {"item": "proSystemTotalStats", "statisticsList": pts},
                 {"item": "proGridStats", "statisticsList": [{"date": p["date"], "val": p["val"] * 0.9} for p in pts]},
             ]}}
+        if path.startswith("/sems-alarm/api/v2/alarm/page"):
+            rows = [a for a in self.alarm_rows if a["stationId"] in body["stationIds"]]
+            return {"code": "00000", "data": {"dataList": rows, "total": len(rows)}}
         if path.startswith("/sems-plant/api/stations/flow"):
             return {"code": "00000", "data": {"pSystem": 42.5}}
         return {"code": "404", "description": "not found"}
@@ -92,11 +96,11 @@ class SemsPlusClientTest(unittest.TestCase):
         self.assertEqual(c.station_today("s1", today=date(2026, 11, 23))["today_kwh"], 5)
 
     def test_list_stations_paging(self):
-        stations = [{"id": f"id{i}", "name": f"站{i}", "installedPower": 10 + i} for i in range(250)]
+        stations = [{"id": f"id{i}", "name": f"站{i}", "installedPower": 10 + i, "status": "1"} for i in range(250)]
         c = SemsPlusClient("a", "pw", request=FakeSemsPlus(stations=stations))
         got = c.list_stations()
         self.assertEqual(len(got), 250)
-        self.assertEqual(got[249], {"id": "id249", "name": "站249", "capacity_kwp": 259.0})
+        self.assertEqual(got[249], {"id": "id249", "name": "站249", "capacity_kwp": 259.0, "status": 1})
 
     def test_history_splits_by_year(self):
         daily = {"s1": {"2024-12-31": 1, "2025-01-01": 2, "2025-06-01": 3}}
@@ -159,3 +163,67 @@ class SemsPlusSyncTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MonitorSyncTest(unittest.TestCase):
+    def test_status_power_alarms_and_overview(self):
+        from solar import monitor
+        conn = db.connect(":memory:")
+        stations = [{"id": "g1", "name": "一号", "installedPower": 100, "status": "1"},
+                    {"id": "g2", "name": "二号", "installedPower": 100, "status": "2"},
+                    {"id": "g3", "name": "三号", "installedPower": 100, "status": "0"}]
+        t = date(2026, 11, 23).isoformat()
+        fake = FakeSemsPlus(stations=stations, daily={"g1": {t: 500}, "g2": {t: 480}, "g3": {t: 100}})
+        fake.alarm_rows = [
+            {"warningid": "w1", "stationId": "g2", "stationname": "二号", "devicesn": "SN1", "deviceName": "逆变器1",
+             "warning_code": "E01", "warningNameZh": "电网过压", "alarmLevel": "Total_FaultLevel_Fault",
+             "status": 0, "happentimes": "2026-11-23 10:00:00", "recoverytimes": None},
+            {"warningid": "w2", "stationId": "g1", "warningNameEn": "Fan fault", "status": 1,
+             "happentime": "1763870400000", "recoverytimes": "2026-11-23 11:00:00"},
+        ]
+        sync = GoodWeSync(conn, threading.Lock(), SemsPlusClient("a", "pw", request=fake))
+        sync.discover()
+        from solar import clock
+        orig = clock.today
+        clock.today = lambda: date(2026, 11, 23)
+        try:
+            st = sync.run_once()
+            ov = monitor.overview(conn)
+        finally:
+            clock.today = orig
+        self.assertTrue(st["ok"], st)
+        by = {r["name"]: r for r in ov["stations"]}
+        self.assertEqual((by["一号"]["status"], by["二号"]["status"], by["三号"]["status"]),
+                         ("running", "fault", "offline"))
+        self.assertEqual(by["一号"]["power_w"], 42500)
+        self.assertEqual(by["二号"]["active_alarms"], 1)
+        self.assertEqual(by["一号"]["active_alarms"], 0)
+        self.assertTrue(by["三号"]["low_eff"])          # 1 h vs 中位数 4.8 h
+        self.assertFalse(by["一号"]["low_eff"])
+        self.assertEqual(ov["summary"]["counts"], {"running": 1, "fault": 1, "offline": 1})
+        self.assertEqual(ov["summary"]["today_kwh"], 1080)
+        alarms = monitor.list_alarms(conn)
+        self.assertEqual([a["warning_id"] for a in alarms], ["w1", "w2"])  # 进行中的排前面
+        self.assertEqual(alarms[0]["station"], "二号")
+        self.assertEqual(monitor.list_alarms(conn, active_only=True)[0]["name"], "电网过压")
+        # 告警恢复后更新
+        fake.alarm_rows[0]["status"] = 1
+        fake.alarm_rows[0]["recoverytimes"] = "2026-11-23 12:00:00"
+        sync.run_once(today=date(2026, 11, 23))
+        self.assertEqual(monitor.list_alarms(conn, active_only=True), [])
+
+    def test_report_csv(self):
+        from solar import monitor
+        conn = db.connect(":memory:")
+        a = db.create_station(conn, {"name": "A", "capacity_kwp": 10, "price": 0.5})
+        db.create_station(conn, {"name": "B", "capacity_kwp": 20, "price": 0.5})
+        db.upsert_record(conn, a["id"], "2026-10-01", 40)
+        db.upsert_record(conn, a["id"], "2026-10-02", 60)
+        db.upsert_record(conn, a["id"], "2025-10-02", 99)
+        rep = monitor.report_csv(conn, "2026-10")
+        self.assertIn("A,10.0,100.0,10.0,0.5,50.0,2", rep)
+        self.assertIn("B,20.0,0,0.0,0.5,0.0,0", rep)
+        self.assertIn("合计,30.0,100.0", rep)
+        self.assertIn("A,10.0,100.0", monitor.report_csv(conn, "2026"))
+        with self.assertRaises(db.ValidationError):
+            monitor.report_csv(conn, "26-1")

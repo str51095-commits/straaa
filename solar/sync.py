@@ -3,7 +3,7 @@ import os
 import threading
 from datetime import date
 
-from . import clock, db
+from . import clock, db, monitor
 from .goodwe import DEFAULT_LOGIN_URL, GoodWeClient, GoodWeError
 
 SYNC_NOTE = "固德威自动同步"
@@ -58,14 +58,27 @@ class GoodWeSync:
             today = today or clock.today()
             stations = self._linked_stations()
             results = []
+            extra_errors = []
+            # 电站运行状态（一次请求拿到所有电站）
+            if stations and hasattr(self.client, "list_stations"):
+                try:
+                    remote = {r["id"]: r for r in self.client.list_stations()}
+                    with self.lock:
+                        for st in stations:
+                            r = remote.get(st["goodwe_station_id"])
+                            if r and r.get("status") is not None:
+                                monitor.update_station_status(self.conn, st["goodwe_station_id"], status=r["status"])
+                except GoodWeError as e:
+                    extra_errors.append(f"读取电站状态失败: {e}")
             for st in stations:
                 item = {"station": st["name"], "goodwe_station_id": st["goodwe_station_id"]}
                 try:
                     data = self.client.station_today(st["goodwe_station_id"])
                     item.update(data)
-                    if data["today_kwh"] is not None:
-                        with self.lock:
+                    with self.lock:
+                        if data["today_kwh"] is not None:
                             db.upsert_record(self.conn, st["id"], today.isoformat(), data["today_kwh"], SYNC_NOTE)
+                        monitor.update_station_status(self.conn, st["goodwe_station_id"], power_w=data.get("power_w"))
                     item["ok"] = True
                 except GoodWeError as e:
                     item.update(ok=False, error=str(e))
@@ -78,6 +91,15 @@ class GoodWeSync:
                 results.append(item)
             else:
                 self.status["paused"] = False
+            # 告警
+            if stations and not self.status["paused"] and hasattr(self.client, "alarms"):
+                try:
+                    alarms = self.client.alarms([s["goodwe_station_id"] for s in stations])
+                    with self.lock:
+                        monitor.upsert_alarms(self.conn, alarms)
+                except GoodWeError as e:
+                    extra_errors.append(f"读取告警失败: {e}")
+            self.status["extra_errors"] = extra_errors
             failed = [r for r in results if not r["ok"]]
             if self.status["paused"]:
                 msg, ok = "固德威账号或密码错误，自动同步已暂停。修改配置后重启平台，或点“立即同步”重试", False

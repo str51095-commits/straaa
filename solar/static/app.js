@@ -9,6 +9,9 @@
     stationId: localGet("stationId") || "",
     period: "daily",
     month: ymd(new Date()).slice(0, 7),
+    monFilter: localGet("monFilter") || "all",
+    monitor: null,
+    alarmActive: "1",
     year: new Date().getFullYear(),
   };
 
@@ -72,6 +75,8 @@
     $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === name));
     $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
     if (name === "entry") { loadRecords(); loadSync().catch(() => {}); }
+    if (name === "monitor") loadMonitor().catch(e => toast(e.message, true));
+    if (name === "alarms") loadAlarms().catch(e => toast(e.message, true));
   }
 
   // ---------- 电站 ----------
@@ -333,6 +338,92 @@
         <button class="btn small danger" data-delrec="${r.id}">删除</button></td></tr>`).join("") + "</tbody>";
   }
 
+  // ---------- 电站监控 ----------
+  const STATUS_ORDER = { fault: 0, offline: 1, waiting: 2, building: 3, unknown: 4, running: 5, manual: 6 };
+  const STATUS_LABEL = { running: "正常运行", fault: "故障", offline: "离线", waiting: "等待", building: "建设中", unknown: "未知", manual: "未接入" };
+  const stBadge = (key, label) => `<span class="st st-${key}">${esc(label || STATUS_LABEL[key] || key)}</span>`;
+  const powerStr = w => w == null ? "—" : (Math.abs(w) >= 1e6 ? nf(w / 1e6, 2) + " MW" : nf(w / 1000, 1) + " kW");
+
+  async function loadMonitor() {
+    const m = state.monitor = await api("/api/monitor");
+    const sm = m.summary, c = sm.counts;
+    const badge = $("#alarmBadge");
+    badge.textContent = sm.active_alarms;
+    badge.classList.toggle("hidden", !sm.active_alarms);
+    const linked = m.stations.some(x => x.linked);
+    const strip = $("#statusStrip");
+    strip.classList.toggle("hidden", !linked);
+    if (linked) {
+      const parts = ["running", "fault", "offline", "waiting", "building", "unknown"].filter(k => c[k])
+        .map(k => `<span>${stBadge(k)} <b>${c[k]}</b></span>`);
+      if (sm.active_alarms) parts.push(`<span class="tag crit">告警 ${sm.active_alarms}</span>`);
+      if (sm.low_eff) parts.push(`<span class="tag warn">发电偏低 ${sm.low_eff}</span>`);
+      strip.innerHTML = parts.join("") + `<span>实时功率 <b>${powerStr(sm.power_kw * 1000)}</b></span><span class="more">电站监控 ›</span>`;
+    }
+    if ($("#view-monitor").classList.contains("active")) renderMonitor();
+  }
+
+  function renderMonitor() {
+    const m = state.monitor; if (!m) return;
+    const sm = m.summary, c = sm.counts;
+    const [tv, tu] = energy(sm.today_kwh);
+    const pw = powerStr(sm.power_kw * 1000).split(" ");
+    $("#monTotals").innerHTML =
+      `<div class="kpi"><div class="label">电站总数</div><div class="value">${sm.total}<small>座</small></div><div class="sub">正常运行 ${c.running || 0} 座</div></div>` +
+      `<div class="kpi"><div class="label">实时总功率</div><div class="value">${pw[0]}<small>${pw[1] || ""}</small></div><div class="sub">最近一次同步</div></div>` +
+      `<div class="kpi"><div class="label">今日总发电</div><div class="value">${tv}<small>${tu}</small></div><div class="sub">${sm.median_hours != null ? `等效小时中位数 ${nf(sm.median_hours, 2)} h` : "　"}</div></div>` +
+      `<div class="kpi"><div class="label">进行中告警</div><div class="value">${sm.active_alarms}<small>条</small></div><div class="sub">${sm.low_eff ? `${sm.low_eff} 座发电偏低` : "无发电偏低电站"}</div></div>`;
+    const chips = [["all", "全部", sm.total]];
+    ["fault", "offline", "waiting", "building", "unknown", "running", "manual"].forEach(k => { if (c[k]) chips.push([k, STATUS_LABEL[k], c[k]]); });
+    if (sm.active_alarms) chips.push(["alarm", "有告警", m.stations.filter(x => x.active_alarms).length]);
+    if (sm.low_eff) chips.push(["loweff", "发电偏低", sm.low_eff]);
+    if (!chips.some(x => x[0] === state.monFilter)) state.monFilter = "all";
+    $("#monChips").innerHTML = chips.map(([k, l, n]) =>
+      `<button class="chip${state.monFilter === k ? " active" : ""}" data-f="${k}">${["all", "alarm", "loweff"].includes(k) ? esc(l) : stBadge(k)} <b>${n}</b></button>`).join("");
+
+    const q = $("#monSearch").value.trim().toLowerCase();
+    const sort = $("#monSort").value;
+    const rows = m.stations.filter(r => {
+      const f = state.monFilter;
+      if (f === "alarm" && !r.active_alarms) return false;
+      if (f === "loweff" && !r.low_eff) return false;
+      if (!["all", "alarm", "loweff"].includes(f) && r.status !== f) return false;
+      return !q || r.name.toLowerCase().includes(q) || (r.location || "").toLowerCase().includes(q);
+    });
+    const num = v => v == null ? -Infinity : v;
+    const asc = v => v == null ? Infinity : v;
+    rows.sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "zh")
+      : sort === "status" ? (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (b.active_alarms - a.active_alarms) || (asc(a.today_hours) - asc(b.today_hours))
+      : sort === "today_hours" ? asc(a.today_hours) - asc(b.today_hours)
+      : num(b[sort]) - num(a[sort]));
+    $("#monHint").textContent = `${rows.length} 座电站` + (sort === "today_hours" ? "（今日等效小时从低到高，排在前面的需重点关注）" : "") +
+      (m.stations.some(x => x.status_time) ? "" : "。运行状态和实时功率在固德威同步后显示");
+    $("#monList").innerHTML = rows.length ? rows.map(r => `<button class="mon-card" data-sid="${r.id}">
+      <div class="top">${stBadge(r.status, r.status_label)}<span class="name" title="${esc(r.name)}">${esc(r.name)}</span>
+        ${r.active_alarms ? `<span class="tag crit">告警 ${r.active_alarms}</span>` : ""}${r.low_eff ? `<span class="tag warn">发电偏低</span>` : ""}</div>
+      <div class="grid">
+        <div><div class="k">实时功率</div><div class="v">${powerStr(r.power_w)}</div></div>
+        <div><div class="k">今日发电</div><div class="v">${r.today_kwh == null ? "—" : energyStr(r.today_kwh)}</div></div>
+        <div><div class="k">今日等效</div><div class="v">${r.today_hours == null ? "—" : nf(r.today_hours, 2) + " h"}</div></div>
+        <div><div class="k">本月发电</div><div class="v">${energyStr(r.month_kwh)}</div></div>
+      </div>
+      <div class="foot"><span>${nf(r.capacity_kwp, 2)} kWp</span>${r.location ? `<span>${esc(r.location)}</span>` : ""}${r.status_time ? `<span>更新于 ${esc(r.status_time.slice(5, 16).replace("T", " "))}</span>` : ""}</div>
+    </button>`).join("") : `<p class="hint">没有符合条件的电站</p>`;
+  }
+
+  async function loadAlarms() {
+    const rows = await api(`/api/alarms?active=${state.alarmActive}&${sidQuery()}`);
+    const lvl = l => /_Fault$/i.test(l || "") ? ["fault", "故障"] : /_alarm$/i.test(l || "") ? ["alarm", "告警"] : /_Prompt$/i.test(l || "") ? ["prompt", "提示"] : ["", l || ""];
+    $("#alarmList").innerHTML = rows.length ? rows.map(a => {
+      const [lk, ll] = lvl(a.level);
+      return `<div class="alarm${a.active ? " on" : ""} lv-${lk}">
+        <div class="t">${a.active ? `<span class="tag ${lk === "fault" ? "crit" : "warn"}">${esc(ll || "告警")} · 进行中</span>` : `<span class="tag" style="color:var(--muted)">已恢复</span>`}${esc(a.name || a.code || "未知告警")}</div>
+        <div class="m">${esc(a.station || "")}${a.device_name || a.device_sn ? ` · ${esc(a.device_name || "")} ${esc(a.device_sn || "")}` : ""}${a.code ? ` · 代码 ${esc(a.code)}` : ""}</div>
+        <div class="m">发生 ${esc(a.happened || "—")}${a.recovered ? ` · 恢复 ${esc(a.recovered)}` : ""}</div>
+      </div>`;
+    }).join("") : `<p class="hint">${state.alarmActive === "1" ? "当前没有进行中的告警" : "暂无告警记录"}</p>`;
+  }
+
   // ---------- 固德威同步 ----------
   function renderSync(st) {
     const msg = $("#syncMsg");
@@ -367,7 +458,8 @@
 
   async function refreshAll() {
     await loadStations();
-    await Promise.all([loadSummary(), loadChart()]);
+    await Promise.all([loadSummary(), loadChart(), loadMonitor().catch(() => {})]);
+    if ($("#view-alarms").classList.contains("active")) await loadAlarms();
     if ($("#view-entry").classList.contains("active")) await loadRecords();
   }
 
@@ -375,6 +467,7 @@
   function bind() {
     $$(".tab").forEach(b => b.onclick = () => showView(b.dataset.view));
     $$("[data-goto]").forEach(b => b.onclick = () => showView(b.dataset.goto));
+    $("#stationSelect").addEventListener("change", () => { if ($("#view-alarms").classList.contains("active")) loadAlarms().catch(() => {}); });
 
     $("#stationSelect").onchange = guard(async e => {
       state.stationId = e.target.value;
@@ -402,6 +495,35 @@
     });
     $("#prevBtn").onclick = step(-1);
     $("#nextBtn").onclick = step(1);
+
+    $("#monChips").onclick = e => {
+      const b = e.target.closest(".chip"); if (!b) return;
+      state.monFilter = b.dataset.f; localSet("monFilter", state.monFilter); renderMonitor();
+    };
+    $("#monSearch").oninput = () => renderMonitor();
+    $("#monSort").onchange = () => { localSet("monSort", $("#monSort").value); renderMonitor(); };
+    const savedSort = localGet("monSort"); if (savedSort) $("#monSort").value = savedSort;
+    $("#monList").onclick = guard(async e => {
+      const card = e.target.closest(".mon-card"); if (!card) return;
+      state.stationId = card.dataset.sid; localSet("stationId", state.stationId);
+      $("#stationSelect").value = state.stationId;
+      $("#exportLink").href = "/api/export?" + sidQuery();
+      showView("dashboard");
+      await Promise.all([loadSummary(), loadChart()]);
+      scrollTo({ top: 0 });
+    });
+    $$("#alarmSeg button").forEach(b => b.onclick = guard(async () => {
+      $$("#alarmSeg button").forEach(x => x.classList.toggle("active", x === b));
+      state.alarmActive = b.dataset.active; await loadAlarms();
+    }));
+    const reportMonth = $("#reportMonth");
+    const setReport = () => {
+      const v = reportMonth.value || state.month;
+      $("#reportMonthLink").href = `/api/export/report?period=${v}`;
+      $("#reportYearLink").href = `/api/export/report?period=${v.slice(0, 4)}`;
+      $("#reportYearLink").textContent = `导出 ${v.slice(0, 4)} 年报`;
+    };
+    reportMonth.value = state.month; reportMonth.onchange = setReport; setReport();
 
     $("#demoBtn").onclick = guard(async () => {
       await api("/api/demo", { method: "POST" });

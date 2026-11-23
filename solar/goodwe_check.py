@@ -60,8 +60,13 @@ def main(argv):
     try:
         stations = c.list_stations()
         print(f"  共 {len(stations)} 座")
+        from .monitor import STATUS
+        counts = {}
+        for s in stations:
+            counts[s.get("status")] = counts.get(s.get("status"), 0) + 1
+        print("  状态码统计: " + "，".join(f"{k}({STATUS.get(k, ('', '未知'))[1]})×{v}" for k, v in counts.items()))
         for s in stations[:15]:
-            print(f"  - {s['id']}  {s['name']}  {s['capacity_kwp']} kWp")
+            print(f"  - {s['id']}  {s['name']}  {s['capacity_kwp']} kWp  状态码 {s.get('status')}")
     except GoodWeError as e:
         stations = []
         print(f"  ✖ {e}")
@@ -97,6 +102,17 @@ def main(argv):
         print(f"  {len(hist)} 天有记录，合计 {round(sum(vals), 1)} kWh")
     except GoodWeError as e:
         print(f"  ✖ {e}")
+    print("\n[6] 告警")
+    try:
+        ids = [s["id"] for s in stations] or [sid]
+        alarms = c.alarms(ids, max_pages=1)
+        active = [a for a in alarms if a["active"]]
+        print(f"  最近 {len(alarms)} 条，进行中 {len(active)} 条")
+        for a in (active or alarms)[:5]:
+            print(f"  - {'进行中' if a['active'] else '已恢复'} {a['name']}  {a['station_name']}  {a['happened']}  {a['level']}")
+    except GoodWeError as e:
+        print(f"  ✖ {e}")
+
     print("\n诊断完成。请把以上内容截图发给开发者。")
     return 0
 
