@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import db
 from .auth import COOKIE, SESSION_DAYS, Auth, parse_cookies
+from .goodwe import GoodWeError
 from .sync import GoodWeSync
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -44,6 +45,8 @@ class App:
             ("POST", r"/api/demo", self.demo),
             ("GET", r"/api/sync/status", self.sync_status),
             ("POST", r"/api/sync/run", self.sync_run),
+            ("POST", r"/api/sync/discover", self.sync_discover),
+            ("POST", r"/api/sync/backfill", self.sync_backfill),
         ]
 
     # 每个 handler 返回 (status, body)；body 为 dict/list 时按 JSON 输出
@@ -103,6 +106,23 @@ class App:
 
     def sync_run(self, q, body):
         return 200, self.sync.run_once()
+
+    def sync_discover(self, q, body):
+        self._need_sync()
+        try:
+            return 200, self.sync.discover()
+        except GoodWeError as e:
+            return 502, {"error": str(e)}
+
+    def sync_backfill(self, q, body):
+        self._need_sync()
+        years = body.get("years")
+        years = int(years) if str(years or "").isdigit() and 0 < int(years) <= 20 else None
+        return 200, self.sync.start_backfill(years)
+
+    def _need_sync(self):
+        if not self.sync.client:
+            raise db.ValidationError("未配置固德威账号（GOODWE_ACCOUNT / GOODWE_PASSWORD）")
 
     def dispatch(self, method, path, query, body):
         for m, pattern, fn in self.routes:

@@ -218,6 +218,21 @@ def upsert_record(conn, station_id, day, kwh, note=""):
     ).fetchone())
 
 
+def upsert_synced(conn, station_id, rows, note):
+    """批量写入从云平台获取的数据；不覆盖用户手动录入的记录。返回写入/更新的条数。"""
+    n = 0
+    with conn:
+        for day, kwh in rows:
+            cur = conn.execute(
+                """INSERT INTO generation (station_id, day, kwh, note) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(station_id, day) DO UPDATE SET kwh = excluded.kwh, note = excluded.note
+                   WHERE generation.note LIKE '固德威%'""",
+                (station_id, _parse_day(day), _parse_kwh(kwh), note),
+            )
+            n += cur.rowcount
+    return n
+
+
 def delete_record(conn, record_id):
     with conn:
         cur = conn.execute("DELETE FROM generation WHERE id = ?", (record_id,))

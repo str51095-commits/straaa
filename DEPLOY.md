@@ -35,12 +35,13 @@ curl -fL --retry 3 --connect-timeout 20 https://github.com/str51095-commits/stra
 
 ## 4. 开启固德威自动同步
 
+在服务器终端粘贴（会提示输入 SEMS+ 账号和密码，密码可见、支持特殊字符）：
+
 ```bash
-sudo nano /etc/solar-ems.env      # 去掉 GOODWE_ACCOUNT / GOODWE_PASSWORD 前面的 #，填写 SEMS 账号
-sudo systemctl restart solar-ems
+sudo bash -c 'read -p "SEMS账号: " A; read -p "SEMS密码: " P; sed -i "/^#\?GOODWE_ACCOUNT=/d;/^#\?GOODWE_PASSWORD=/d" /etc/solar-ems.env; printf "GOODWE_ACCOUNT=%s\nGOODWE_PASSWORD=%s\n" "$A" "$P" >> /etc/solar-ems.env; systemctl restart solar-ems; echo 已保存并重启'
 ```
 
-再到平台「电站管理」里填写固德威电站 ID 即可。
+然后运行诊断：`sudo solar-goodwe-check`。登录成功后，在平台「数据录入 → 固德威自动同步」点 **从固德威导入电站**、**补录历史数据**。
 
 ## 日常维护
 
@@ -48,6 +49,7 @@ sudo systemctl restart solar-ems
 |---|---|
 | 查看运行状态 | `systemctl status solar-ems` |
 | 查看日志 | `journalctl -u solar-ems -f` |
+| 固德威连接诊断 | `sudo solar-goodwe-check` |
 | 重启 | `sudo systemctl restart solar-ems` |
 | 修改密码 / 配置 | `sudo nano /etc/solar-ems.env` 后重启 |
 | 升级到新版本 | 先执行 `cd ~`，再重新执行第 2 步那行安装命令（数据和配置会保留） |

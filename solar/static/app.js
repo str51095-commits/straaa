@@ -334,11 +334,23 @@
     msg.className = "sync-msg " + (st.ok === true ? "ok" : st.ok === false ? "err" : "");
     if (!st.enabled) {
       msg.innerHTML = `<span class="dot"></span>未开启。启动前设置环境变量 <code>GOODWE_ACCOUNT</code> 和 <code>GOODWE_PASSWORD</code>（SEMS 账号密码），并在「电站管理」中填写固德威电站 ID。`;
-      $("#syncBtn").disabled = true;
+      ["#syncBtn", "#discoverBtn", "#backfillBtn"].forEach(id => $(id).disabled = true);
       $("#syncTable").innerHTML = "";
       return;
     }
     $("#syncBtn").disabled = false;
+    $("#discoverBtn").classList.toggle("hidden", !st.can_discover);
+    $("#backfillBtn").classList.toggle("hidden", !st.can_backfill);
+    const bf = st.backfill;
+    $("#backfillMsg").classList.toggle("hidden", !bf);
+    $("#backfillBtn").disabled = !!(bf && bf.running);
+    if (bf) {
+      $("#backfillMsg").innerHTML = `<span class="dot"></span>${bf.running ? `历史补录中 ${bf.done}/${bf.total} · ` : ""}${esc(bf.message)}` +
+        (bf.errors && bf.errors.length ? `<br>${bf.errors.slice(0, 3).map(esc).join("<br>")}` : "");
+      $("#backfillMsg").className = "sync-msg " + (bf.running ? "" : bf.errors && bf.errors.length ? "err" : "ok");
+      if (bf.running) { clearTimeout(renderSync.t); renderSync.t = setTimeout(() => loadSync().then(() => { if (!(state.lastBf && state.lastBf.running)) refreshAll(); }).catch(() => {}), 3000); }
+    }
+    state.lastBf = bf;
     msg.innerHTML = `<span class="dot"></span>${esc(st.message)}` +
       (st.last_run ? ` · 上次同步 ${esc(st.last_run.replace("T", " "))}` : "") + ` · 每 ${st.interval_min} 分钟自动同步`;
     const rows = st.stations || [];
@@ -446,6 +458,15 @@
     });
 
     $("#recordsMonth").onchange = guard(loadRecords);
+    $("#discoverBtn").onclick = guard(async () => {
+      const r = await api("/api/sync/discover", { method: "POST" });
+      toast(`固德威账号下共 ${r.found} 座电站，新导入 ${r.created} 座` + (r.already ? `，${r.already} 座已存在` : ""));
+      await refreshAll(); await loadSync();
+    });
+    $("#backfillBtn").onclick = guard(async () => {
+      if (!confirm("从固德威读取所有已关联电站的历史每日发电量（最多 10 年），手动录入的数据不会被覆盖。电站多时需要几分钟，确定开始？")) return;
+      renderSync(await api("/api/sync/backfill", { method: "POST", body: {} }));
+    });
     $("#syncBtn").onclick = guard(async () => {
       $("#syncBtn").disabled = true; $("#syncBtn").textContent = "同步中…";
       try {

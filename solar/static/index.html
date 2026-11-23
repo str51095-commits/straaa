@@ -97,9 +97,14 @@
     <div class="card" id="syncCard">
       <div class="card-head">
         <h2>固德威自动同步</h2>
-        <button class="btn" id="syncBtn">立即同步</button>
+        <div class="row-gap">
+          <button class="btn" id="discoverBtn">从固德威导入电站</button>
+          <button class="btn" id="backfillBtn">补录历史数据</button>
+          <button class="btn" id="syncBtn">立即同步</button>
+        </div>
       </div>
       <p id="syncMsg" class="sync-msg"></p>
+      <p id="backfillMsg" class="sync-msg hidden"></p>
       <div class="table-scroll"><table id="syncTable"></table></div>
     </div>
     <div class="card">

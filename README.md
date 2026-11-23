@@ -35,36 +35,26 @@ python3 run.py --port 9000 --db /path/to/my-solar.db
 
 ## 固德威 (GoodWe) 自动同步
 
-平台可以每隔一段时间从固德威 SEMS 云平台读取电站的**当日发电量**，自动写入当天的记录，不用再手动录入。
+对接固德威 **SEMS+** 新平台（默认中国区 `cn-semsplus.goodwe.com`），使用与 SEMS+ App 相同的账号密码。
 
-1. 在 **电站管理** 里编辑电站，填写 **固德威电站 ID**。
-   登录 [SEMS 网页版](https://www.semsportal.com)，打开电站页面，浏览器地址栏中那串类似
-   `1a2b3c4d-xxxx-xxxx-xxxx-xxxxxxxxxxxx` 的 ID 就是电站 ID。
-2. 启动时用环境变量提供 SEMS 账号（与 SEMS App 登录的账号密码相同）：
-
-   ```bash
-   # macOS / Linux
-   GOODWE_ACCOUNT=你的账号 GOODWE_PASSWORD=你的密码 python3 run.py
-   ```
-   ```bat
-   :: Windows (cmd)
-   set GOODWE_ACCOUNT=你的账号
-   set GOODWE_PASSWORD=你的密码
-   python run.py
-   ```
-
-3. 在 **数据录入** 页的“固德威自动同步”卡片里可以看到同步状态，也可以点 **立即同步**。
+- **从固德威导入电站**：读取账号下所有电站，自动创建并关联（名称、装机容量、电站 ID）。
+- **自动同步**：每 15 分钟写入每座电站的当日发电量。
+- **补录历史数据**：读取历史每日发电量（最多 10 年），手动录入的数据不会被覆盖。
+- 账号密码错误时自动暂停定时同步，避免账号被锁。
 
 | 环境变量 | 说明 | 默认 |
 |---|---|---|
-| `GOODWE_ACCOUNT` / `GOODWE_PASSWORD` | SEMS 账号、密码（都设置了才会开启同步） | — |
+| `GOODWE_ACCOUNT` / `GOODWE_PASSWORD` | SEMS+ 账号、密码（都设置了才会开启） | — |
+| `GOODWE_REGION` | 区域：`cn` / `eu` / `hk` / `au` / `us` | `cn` |
 | `GOODWE_SYNC_MINUTES` | 同步间隔（分钟） | 15 |
-| `GOODWE_LOGIN_URL` | 登录接口地址 | `https://www.semsportal.com/api/v2/Common/CrossLogin` |
+| `GOODWE_ITEM` | 作为发电量的统计项 | `proSystemTotalStats` |
+| `GOODWE_API` | 设为 `legacy` 使用旧版 semsportal.com 接口 | `semsplus` |
 
-说明：
-- 每次同步会用最新的“今日发电量”覆盖当天记录（备注为“固德威自动同步”）。日落后的最后一次同步即为当天最终值，所以平台需要保持运行。
-- 历史数据请从 SEMS 导出后用 CSV 导入。
-- 对接逻辑在 `solar/goodwe.py`。固德威未公开官方接口文档，此处采用开源社区通用的 SEMS 接口；如果申请到官方 OpenAPI，只需修改该文件。
+服务器上运行 `sudo solar-goodwe-check [电站ID]` 可逐步诊断登录、电站列表、发电量统计（不显示密码）。
+
+电站 ID：SEMS+ 网页版电站详情页地址 `#/station_monitor/station_detail?` 后面那段是 Base64 编码，解码后的 `stationId` 即电站 ID；用“从固德威导入电站”则无需手动填写。
+
+对接逻辑在 `solar/semsplus.py`。固德威未公开接口文档，实现参考开源项目 sems-plus-client / goodwe-sems-home-assistant；拿到官方 OpenAPI 后只需替换该文件。
 
 ## 登录密码与访问范围
 

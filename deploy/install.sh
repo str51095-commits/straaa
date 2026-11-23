@@ -82,6 +82,8 @@ SOLAR_DB=$DATA_DIR/solar.db
 #GOODWE_ACCOUNT=
 #GOODWE_PASSWORD=
 #GOODWE_SYNC_MINUTES=15
+# 区域：cn=中国区(cn-semsplus.goodwe.com)  eu / hk / au / us
+#GOODWE_REGION=cn
 
 # 如果前面加了 Nginx/Caddy 做 HTTPS 反向代理，改为 1
 #SOLAR_TRUST_PROXY=1
@@ -89,6 +91,13 @@ SOLAR_DB=$DATA_DIR/solar.db
 CONF
   chmod 600 "$ENV_FILE"
 fi
+
+# 固德威连接诊断命令：sudo solar-goodwe-check [电站ID]
+cat > /usr/local/bin/solar-goodwe-check <<WRAP
+#!/bin/sh
+cd $APP_DIR && exec $PY -m solar.goodwe_check "\$@"
+WRAP
+chmod 755 /usr/local/bin/solar-goodwe-check
 
 cat > "$SERVICE" <<UNIT
 [Unit]
