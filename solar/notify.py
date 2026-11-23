@@ -209,22 +209,7 @@ def collect_events(conn, prev_status, now_hm=None):
         conn.execute("UPDATE alarms SET notified_recovery = 1 WHERE active = 0 AND notified_recovery = 0")
 
     if cfg["notify_status"] == "1":
-        daytime = _in_daytime(cfg, now_hm)
-        for s in conn.execute("SELECT id, name, status FROM stations WHERE goodwe_station_id != ''"):
-            old, new = prev_status.get(s["id"]), s["status"]
-            if old is None or new is None or old == new:
-                continue
-            _, old_l = monitor.status_info(old, True)
-            _, new_l = monitor.status_info(new, True)
-            if new == 2:
-                lines.append(f"⚠️ [状态] {s['name']}：{old_l} → **故障**")
-                n_status += 1
-            elif new == 0 and daytime:
-                lines.append(f"⚠️ [状态] {s['name']}：{old_l} → **离线**")
-                n_status += 1
-            elif new == 1 and old in (0, 2) and daytime:
-                lines.append(f"✅ [状态] {s['name']}：{old_l} → 正常运行")
-                n_status += 1
+        n_status += _status_events(conn, cfg, now_hm, lines)
 
     if not lines:
         return None
@@ -235,6 +220,51 @@ def collect_events(conn, prev_status, now_hm=None):
         title = "光伏告警已恢复"
     lines.append(f"\n时间：{clock.now_iso().replace('T', ' ')}")
     return title, lines
+
+
+FLEET_RUNNING_RATIO = 0.8   # 至少 80% 的电站在正常发电，才认为是“白天”，此时离线的电站才算异常
+OFFLINE_CONFIRM = 2         # 连续 2 次同步（约 30 分钟）都满足条件才提醒离线，过滤日出日落的过渡期
+MIN_FLEET = 3               # 电站少于 3 座时无法用整体判断，改用白天时段
+
+
+def _status_events(conn, cfg, now_hm, lines):
+    """基于当前状态（而非状态跳变）判断：
+    - 故障：任何时间，出现即提醒一次；
+    - 离线：只有在大部分电站正常发电时才提醒（日落、日出时全体离线属正常）；
+      这样“昨晚还好、今早没有恢复上线”的电站也能被发现；
+    - 恢复正常：只对之前提醒过的电站发送。
+    """
+    rows = conn.execute("""SELECT id, name, status, status_alerted, offline_streak FROM stations
+                           WHERE goodwe_station_id != '' AND status IS NOT NULL""").fetchall()
+    if not rows:
+        return 0
+    running = sum(1 for r in rows if r["status"] == 1)
+    if len(rows) >= MIN_FLEET:
+        fleet_day = running / len(rows) >= FLEET_RUNNING_RATIO
+    else:
+        fleet_day = _in_daytime(cfg, now_hm)
+    n = 0
+    updates = []
+    for r in rows:
+        st, alerted, streak = r["status"], r["status_alerted"] or 0, r["offline_streak"] or 0
+        streak = streak + 1 if (st == 0 and fleet_day) else 0
+        if st == 2 and alerted != 2:
+            lines.append(f"⚠️ [故障] {r['name']}：电站状态为**故障**")
+            alerted = 2
+            n += 1
+        elif st == 0 and alerted == 0 and streak >= OFFLINE_CONFIRM:
+            extra = f"（{running}/{len(rows)} 座电站正在发电）" if len(rows) >= MIN_FLEET else ""
+            lines.append(f"⚠️ [离线] {r['name']}：电站**离线**{extra}")
+            alerted = 1
+            n += 1
+        elif st == 1 and alerted:
+            lines.append(f"✅ [恢复] {r['name']}：已恢复正常运行")
+            alerted = 0
+            n += 1
+        updates.append((alerted, streak, r["id"]))
+    with conn:
+        conn.executemany("UPDATE stations SET status_alerted = ?, offline_streak = ? WHERE id = ?", updates)
+    return n
 
 
 def daily_report(conn):

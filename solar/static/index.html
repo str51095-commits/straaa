@@ -215,10 +215,10 @@
           <legend>通知内容</legend>
           <label><input type="checkbox" name="notify_alarm"> 新告警（固德威上报的设备故障/告警）</label>
           <label><input type="checkbox" name="notify_recovery"> 告警恢复</label>
-          <label><input type="checkbox" name="notify_status"> 电站变为故障 / 离线，以及恢复正常</label>
+          <label><input type="checkbox" name="notify_status"> 电站故障、白天离线（其他电站正常发电时），以及恢复正常</label>
           <label><input type="checkbox" name="notify_daily"> 每日发电日报，发送时间 <input type="time" name="notify_daily_time" class="inline-time"></label>
         </fieldset>
-        <label>离线提醒时段（夜间逆变器休眠属正常，不提醒）
+        <label>白天时段（3 座以上电站时自动按“大部分电站在发电”判断白天；电站少于 3 座时按此时段提醒离线）
           <span class="row-gap"><input type="time" name="notify_day_start" class="inline-time"> 至 <input type="time" name="notify_day_end" class="inline-time"></span>
         </label>
         <div class="row-gap">

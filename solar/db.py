@@ -126,7 +126,9 @@ def _migrate(conn):
     added = {"goodwe_station_id": "TEXT DEFAULT ''",
              "status": "INTEGER",          # 云平台运行状态码（见 monitor.STATUS）
              "power_w": "REAL",            # 最近一次同步的实时功率
-             "status_time": "TEXT"}        # 最近一次同步时间
+             "status_time": "TEXT",        # 最近一次同步时间
+             "status_alerted": "INTEGER DEFAULT 0",  # 已发送的状态提醒：0 无 / 1 离线 / 2 故障
+             "offline_streak": "INTEGER DEFAULT 0"}  # 连续几次同步处于“白天离线”
     with conn:
         for col, typ in added.items():
             if col not in cols:

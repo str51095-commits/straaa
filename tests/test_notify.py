@@ -101,23 +101,76 @@ class NotifyTest(unittest.TestCase):
         self.assertTrue(any("另有 **1** 条较早" in line for line in lines))
         self.assertIn("2 条告警", title)
 
-    def test_status_changes_respect_daytime(self):
+    def _fleet(self, n=5):
+        ids = []
+        for i in range(n):
+            st = db.create_station(self.conn, {"name": f"站{i}", "capacity_kwp": 50, "goodwe_station_id": f"f{i}"})
+            ids.append(st)
         db.set_setting(self.conn, "alarm_baseline_done", "1")
-        monitor.update_station_status(self.conn, "g1", status=0)
-        monitor.update_station_status(self.conn, "g2", status=2)
-        prev = {self.a["id"]: 1, self.b["id"]: 1}
-        self.assertEqual(len(notify.collect_events(self.conn, prev, now_hm=10 * 60)[1]) - 1, 2)  # 白天：离线+故障
-        ev = notify.collect_events(self.conn, prev, now_hm=22 * 60)  # 夜间：只报故障
-        body = [line for line in ev[1] if line.startswith("⚠️")]
-        self.assertEqual(len(body), 1)
-        self.assertIn("故障", body[0])
-        self.assertIsNone(notify.collect_events(self.conn, {self.a["id"]: 0, self.b["id"]: 2}, now_hm=600))
+        # 只看车队电站：把 setUp 中的两座解除关联
+        with self.conn:
+            self.conn.execute("UPDATE stations SET goodwe_station_id = '' WHERE goodwe_station_id IN ('g1','g2')")
+        return ids
+
+    def _set(self, statuses):
+        for i, code in enumerate(statuses):
+            monitor.update_station_status(self.conn, f"f{i}", status=code)
+
+    def _status_lines(self):
+        ev = notify.collect_events(self.conn, {}, now_hm=12 * 60)
+        return [line for line in (ev[1] if ev else []) if line[:1] in ("⚠", "✅")]
+
+    def test_sunset_and_sunrise_are_silent(self):
+        self._fleet()
+        self._set([1, 1, 1, 1, 1]); self.assertEqual(self._status_lines(), [])
+        self._set([1, 1, 1, 1, 0]); self.assertEqual(self._status_lines(), [])   # 日落开始：80% 仍在发电，第一次不提醒
+        self._set([0, 0, 1, 1, 1]); self.assertEqual(self._status_lines(), [])   # 30 分钟后：60%，不算白天
+        self._set([0, 0, 0, 0, 0]); self.assertEqual(self._status_lines(), [])   # 夜间
+        self._set([1, 1, 0, 0, 0]); self.assertEqual(self._status_lines(), [])   # 日出中
+        self._set([1, 1, 1, 1, 1]); self.assertEqual(self._status_lines(), [])
+
+    def test_station_not_coming_back_in_morning(self):
+        self._fleet()
+        self._set([0, 0, 0, 0, 0]); self.assertEqual(self._status_lines(), [])
+        self._set([1, 1, 1, 1, 0])
+        self.assertEqual(self._status_lines(), [])  # 第一次：等待确认
+        lines = self._status_lines()                # 第二次同步仍离线：提醒
+        self.assertEqual(len(lines), 1)
+        self.assertIn("站4", lines[0])
+        self.assertIn("离线", lines[0])
+        self.assertEqual(self._status_lines(), [])  # 不重复提醒
+        self._set([0, 0, 0, 0, 0]); self.assertEqual(self._status_lines(), [])   # 夜间仍离线，不再提醒
+        self._set([1, 1, 1, 1, 1])
+        lines = self._status_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("恢复", lines[0])
+        self.assertEqual(self._status_lines(), [])
+
+    def test_fault_any_time_once(self):
+        self._fleet()
+        self._set([0, 0, 0, 0, 2])  # 夜里出现故障也提醒
+        lines = self._status_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("故障", lines[0])
+        self.assertEqual(self._status_lines(), [])
+        self._set([1, 1, 1, 1, 1])
+        self.assertIn("恢复", self._status_lines()[0])
+
+    def test_small_fleet_uses_daytime_window(self):
+        db.set_setting(self.conn, "alarm_baseline_done", "1")
+        monitor.update_station_status(self.conn, "g1", status=1)
+        monitor.update_station_status(self.conn, "g2", status=0)
+        night = notify.collect_events(self.conn, {}, now_hm=22 * 60)
+        self.assertIsNone(night)
+        self.assertIsNone(notify.collect_events(self.conn, {}, now_hm=11 * 60))  # 第一次：等待确认
+        day = notify.collect_events(self.conn, {}, now_hm=11 * 60 + 15)
+        self.assertTrue(any("二号站" in line and "离线" in line for line in day[1]))
 
     def test_disabled_options(self):
         notify.save_config(self.conn, {"notify_alarm": False, "notify_status": False, "notify_recovery": False})
         monitor.upsert_alarms(self.conn, [alarm("x", "g1", True)])
         monitor.update_station_status(self.conn, "g1", status=2)
-        self.assertIsNone(notify.collect_events(self.conn, {self.a["id"]: 1}, now_hm=600))
+        self.assertIsNone(notify.collect_events(self.conn, {}, now_hm=600))
 
     def test_daily_report_once_per_day(self):
         orig = clock.today
