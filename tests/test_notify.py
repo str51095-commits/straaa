@@ -220,6 +220,32 @@ class NotifyTest(unittest.TestCase):
         monitor.upsert_alarms(self.conn, [alarm("s2", "g1", True, name="DC侧SPD故障")])
         self.assertIn("SPD", "\n".join(notify.collect_events(self.conn, {}, now_hm=600)[1]))
 
+    def test_daily_lists_every_station(self):
+        orig = clock.today
+        clock.today = lambda: date(2026, 11, 23)
+        try:
+            c = db.create_station(self.conn, {"name": "三号站", "capacity_kwp": 100, "goodwe_station_id": "g3"})
+            db.upsert_record(self.conn, self.a["id"], "2026-11-23", 120)
+            db.upsert_record(self.conn, self.b["id"], "2026-11-23", 450)
+            title, lines = notify.daily_report(self.conn)
+            body = "\n".join(lines)
+            self.assertLess(body.index("二号站"), body.index("一号站"))  # 按发电量排序
+            self.assertIn("1. 二号站：**450.0** · 4.50 h", body)
+            self.assertIn("今日无数据（1 座）：三号站", body)
+            # 电站很多时分多条发送
+            for i in range(200):
+                st = db.create_station(self.conn, {"name": f"站{i}", "capacity_kwp": 10, "goodwe_station_id": f"x{i}"})
+                db.upsert_record(self.conn, st["id"], "2026-11-23", i)
+            fp = FakePost()
+            title, lines = notify.daily_report(self.conn)
+            notify.send_long(self.conn, title, lines, post=fp)
+            self.assertEqual(len(fp.calls), 2)
+            self.assertIn("（1/2）", fp.calls[0][1]["title"])
+            self.assertIn("站0", fp.calls[1][1]["content"])  # 最后一名在第二条
+            self.assertNotIn("另有", fp.calls[0][1]["content"])
+        finally:
+            clock.today = orig
+
     def test_bad_time_rejected(self):
         with self.assertRaises(db.ValidationError):
             notify.save_config(self.conn, {"notify_daily_time": "25:00"})

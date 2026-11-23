@@ -152,7 +152,7 @@ class App:
                 title, lines = "光伏平台测试消息", ["如果你在微信里看到这条消息，说明通知已设置成功 ✅",
                                                 f"时间：{clock.now_iso().replace('T', ' ')}"]
             try:
-                sent = notify.send(self.conn, title, lines)
+                sent = notify.send_long(self.conn, title, lines)
             except notify.NotifyError as e:
                 return 502, {"error": str(e)}
         if not sent:

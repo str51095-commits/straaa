@@ -34,6 +34,7 @@ DEFAULTS = {
     "notify_mute": "DC侧SPD故障",  # 不推送的告警关键词，每行一个（仍会记录在告警中心）
 }
 MAX_LINES = 30
+DAILY_CHUNK = 120   # 日报每条消息最多行数，电站很多时自动分多条发送
 STALE_HOURS = 6
 
 
@@ -100,14 +101,25 @@ def _parse_hm(v):
 
 # ---------- 发送 ----------
 
-def send(conn, title, lines, post=http_post):
+def send_long(conn, title, lines, post=http_post, chunk=DAILY_CHUNK):
+    """内容较长（如日报列出所有电站）时分成几条发送，每条不超过 chunk 行。"""
+    if len(lines) <= chunk:
+        return send(conn, title, lines, post=post, max_lines=chunk)
+    parts = [lines[i:i + chunk] for i in range(0, len(lines), chunk)]
+    ok = False
+    for i, part in enumerate(parts, 1):
+        ok = send(conn, f"{title}（{i}/{len(parts)}）", part, post=post, max_lines=chunk) or ok
+    return ok
+
+
+def send(conn, title, lines, post=http_post, max_lines=MAX_LINES):
     """把标题 + 若干行内容发到配置的渠道。没配置时返回 False。"""
     cfg = get_config(conn)
     ch, token = cfg["notify_channel"], cfg["notify_token"]
     if not ch or not token:
         return False
-    if len(lines) > MAX_LINES:
-        lines = lines[:MAX_LINES] + [f"……另有 {len(lines) - MAX_LINES} 条，请登录平台查看"]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines] + [f"……另有 {len(lines) - max_lines} 条，请登录平台查看"]
     md = "\n".join(lines)
     try:
         if ch == "pushplus":
@@ -314,18 +326,26 @@ def daily_report(conn):
     if cap:
         lines.append(f"平均等效小时：{sm['today_kwh'] / cap:.2f} h")
     c = sm["counts"]
-    bad = [f"{lbl} {c[k]} 座" for k, lbl in (("fault", "故障"), ("offline", "离线")) if c.get(k)]
-    lines.append(f"运行状态：正常 {c.get('running', 0)} 座" + ("，" + "，".join(bad) if bad else ""))
+    if c.get("fault"):  # 日报在晚上发送，此时电站离线属正常，只列出故障
+        lines.append(f"故障电站：**{c['fault']}** 座")
     if sm["active_alarms"]:
         lines.append(f"进行中告警：**{sm['active_alarms']}** 条")
-    low = sorted((r for r in rows if r["low_eff"]), key=lambda r: r["today_hours"] or 0)
-    if low:
-        lines.append(f"\n发电偏低（低于中位数 {sm['median_hours']} h 的 60%）：")
-        lines += [f"- {r['name']}：{r['today_kwh']} kWh，{r['today_hours']} h" for r in low[:10]]
-    ranked = sorted((r for r in linked if r["today_hours"] is not None), key=lambda r: -r["today_hours"])
-    if ranked:
-        lines.append("\n等效小时最高：")
-        lines += [f"- {r['name']}：{r['today_hours']} h" for r in ranked[:3]]
+    if sm["low_eff"]:
+        lines.append(f"发电偏低：**{sm['low_eff']}** 座（等效小时低于中位数 {sm['median_hours']} h 的 60%，下方标 ⬇）")
+    month_total = sum(r["month_kwh"] or 0 for r in rows)
+    lines.append(f"本月累计：{month_total:,.1f} kWh")
+
+    # 每座电站明细：按今日发电量从高到低
+    lines.append("\n**各电站今日发电**（今日 kWh · 等效 h · 本月 kWh）：")
+    ranked = sorted(linked, key=lambda r: -(r["today_kwh"] or 0))
+    for i, r in enumerate(ranked, 1):
+        hours = f" · {r['today_hours']:.2f} h" if r["today_hours"] is not None else ""
+        mark = (" ⬇" if r["low_eff"] else "") + (" ⚠️故障" if r["status"] == "fault" else "") + \
+               (f" 🔴告警{r['active_alarms']}" if r["active_alarms"] else "")
+        lines.append(f"{i}. {r['name']}：**{r['today_kwh']:,.1f}**{hours} · {r['month_kwh']:,.0f}{mark}")
+    missing = [r for r in rows if r["today_kwh"] is None]
+    if missing:
+        lines.append(f"\n今日无数据（{len(missing)} 座）：" + "、".join(r["name"] for r in missing))
     return f"光伏日报 {ov['date']}：{sm['today_kwh']:,.0f} kWh", lines
 
 
@@ -340,5 +360,5 @@ def maybe_send_daily(conn, post=http_post, now_hm=None):
         return False
     db.set_setting(conn, "daily_report_date", today)
     title, lines = daily_report(conn)
-    send(conn, title, lines, post=post)
+    send_long(conn, title, lines, post=post)
     return True
