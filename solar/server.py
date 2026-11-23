@@ -176,7 +176,7 @@ class App:
         self._need_sync()
         years = body.get("years")
         years = int(years) if str(years or "").isdigit() and 0 < int(years) <= 20 else None
-        return 200, self.sync.start_backfill(years)
+        return 200, self.sync.start_backfill(years, force=bool(body.get("force")))
 
     def _need_sync(self):
         if not self.sync.client:

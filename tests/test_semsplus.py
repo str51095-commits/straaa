@@ -227,3 +227,74 @@ class MonitorSyncTest(unittest.TestCase):
         self.assertIn("A,10.0,100.0", monitor.report_csv(conn, "2026"))
         with self.assertRaises(db.ValidationError):
             monitor.report_csv(conn, "26-1")
+
+
+class BackfillBatchTest(unittest.TestCase):
+    def setUp(self):
+        import solar.sync as sync_mod
+        self.sync_mod = sync_mod
+        self.saved = (sync_mod.RATE_LIMIT_WAITS, sync_mod.BACKFILL_BATCH_PAUSE, sync_mod.BACKFILL_BATCH)
+        sync_mod.RATE_LIMIT_WAITS, sync_mod.BACKFILL_BATCH_PAUSE, sync_mod.BACKFILL_BATCH = [0, 0, 0, 0], 0, 5
+        from solar import clock
+        self.clock, self.orig_today = clock, clock.today
+        clock.today = lambda: date(2026, 11, 23)
+        self.conn = db.connect(":memory:")
+        stations = [{"id": f"s{i}", "name": f"站{i}", "installedPower": 10} for i in range(12)]
+        daily = {f"s{i}": {"2026-11-01": 10 + i, "2025-06-01": 20} for i in range(12)}
+        self.fake = FakeSemsPlus(stations=stations, daily=daily)
+        # 模拟限流：前 3 次统计请求返回 429
+        self.limited = 3
+        orig = self.fake.__call__
+
+        def limited_call(method, url, body, headers, timeout):
+            if "statistics" in url and self.limited > 0:
+                self.limited -= 1
+                from solar.semsplus import GoodWeRateLimit
+                raise GoodWeRateLimit("限流")
+            return orig(method, url, body, headers, timeout)
+        self.sync = GoodWeSync(self.conn, threading.Lock(), SemsPlusClient("a", "pw", request=limited_call))
+        self.sync.discover()
+
+    def tearDown(self):
+        self.sync_mod.RATE_LIMIT_WAITS, self.sync_mod.BACKFILL_BATCH_PAUSE, self.sync_mod.BACKFILL_BATCH = self.saved
+        self.clock.today = self.orig_today
+
+    def wait(self):
+        for _ in range(200):
+            if not self.sync.status["backfill"]["running"]:
+                return self.sync.status["backfill"]
+            time.sleep(0.02)
+        self.fail("backfill did not finish")
+
+    def test_retries_rate_limit_and_skips_done(self):
+        self.sync.start_backfill()
+        bf = self.wait()
+        self.assertEqual(bf["errors"], [])
+        self.assertEqual(bf["done"], 12)
+        n = self.conn.execute("SELECT COUNT(*) FROM generation").fetchone()[0]
+        self.assertEqual(n, 24)  # 12 座 × 2 天
+        self.assertEqual(self.sync.pending_backfill(), [])
+        # 再点一次：没有待补录
+        st = self.sync.start_backfill()
+        self.assertTrue(st["backfill"]["nothing"])
+        # 新导入一座：只补这一座
+        self.fake.stations.append({"id": "s99", "name": "新站", "installedPower": 5})
+        self.fake.daily["s99"] = {"2026-11-02": 7}
+        self.sync.discover()
+        self.sync.start_backfill()
+        bf = self.wait()
+        self.assertEqual((bf["total"], bf["done"]), (1, 1))
+        # 强制全部重新补录
+        self.sync.start_backfill(force=True)
+        self.assertEqual(self.wait()["total"], 13)
+
+    def test_gives_up_after_retries_and_retries_next_time(self):
+        self.limited = 100   # 一直限流
+        self.sync.start_backfill()
+        bf = self.wait()
+        self.assertEqual(len(bf["errors"]), 12)
+        self.assertEqual(len(self.sync.pending_backfill()), 12)  # 失败的下次还会补
+        self.limited = 0
+        self.sync.start_backfill()
+        self.assertEqual(self.wait()["errors"], [])
+        self.assertEqual(self.sync.pending_backfill(), [])

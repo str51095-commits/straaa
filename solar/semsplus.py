@@ -41,6 +41,10 @@ class GoodWeAuthError(GoodWeError):
     """账号或密码被拒绝。"""
 
 
+class GoodWeRateLimit(GoodWeError):
+    """固德威限流（HTTP 429 / GY0429），稍等后重试即可。"""
+
+
 def hash_password(password):
     return base64.b64encode(hashlib.md5(password.encode()).hexdigest().encode()).decode()
 
@@ -59,7 +63,7 @@ def http_json(method, url, payload, headers, timeout):
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            raise GoodWeError("固德威服务器限流（HTTP 429），请稍后再试") from e
+            raise GoodWeRateLimit("固德威服务器限流（HTTP 429），请稍后再试") from e
         raise GoodWeError(f"固德威服务器返回 HTTP {e.code}") from e
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise GoodWeError(f"无法连接固德威服务器: {e}") from e
@@ -104,6 +108,9 @@ class SemsPlusClient:
         self._candidates = ([(login_url, self.region == "cn")] if login_url
                             else login_candidates(self.region))
         self.login_log = []        # 诊断用：每次尝试的结果
+        self.min_interval = float(os.environ.get("GOODWE_MIN_INTERVAL") or 0) if request is not http_json \
+            else float(os.environ.get("GOODWE_MIN_INTERVAL") or 0.5)
+        self._last_request = 0.0
 
     # ---------- 登录 ----------
     def login(self):
@@ -149,9 +156,19 @@ class SemsPlusClient:
         raise last_err or GoodWeError("登录失败")
 
     # ---------- 通用请求 ----------
+    def _throttle(self):
+        """两次请求之间至少间隔 min_interval 秒，降低被限流的概率。"""
+        if self.min_interval <= 0:
+            return
+        wait = self._last_request + self.min_interval - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        self._last_request = time.monotonic()
+
     def _call(self, method, path, body=None, params=None, retry=True):
         if not self.token:
             self.login()
+        self._throttle()
         url = self.token["api"] + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
@@ -167,7 +184,7 @@ class SemsPlusClient:
             self.token = None
             return self._call(method, path, body, params, retry=False)
         if code in RATE_LIMIT_CODES:
-            raise GoodWeError("固德威接口限流，请稍后再试")
+            raise GoodWeRateLimit("固德威接口限流，请稍后再试")
         if code not in OK_CODES:
             raise GoodWeError(f"固德威接口出错（{code}）: {_msg(resp)}")
         return resp.get("data") if "data" in resp else resp

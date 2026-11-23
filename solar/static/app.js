@@ -71,7 +71,13 @@
   }
 
   // ---------- 导航 ----------
+  function hideTip() {
+    const t = $("#tooltip"); if (t) t.classList.add("hidden");
+    $$(".chart-wrap.hovering").forEach(el => el.classList.remove("hovering"));
+  }
+
   function showView(name) {
+    hideTip();
     $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === name));
     $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
     if (name === "entry") { loadRecords(); loadSync().catch(() => {}); }
@@ -321,7 +327,7 @@
       h.addEventListener("pointermove", ev => show(+h.dataset.i, ev));
       h.addEventListener("pointerdown", ev => show(+h.dataset.i, ev));
     });
-    el.onpointerleave = hide;
+    el.onpointerleave = e => { if (e.pointerType === "mouse") hide(); };
   }
 
   // ---------- 记录 ----------
@@ -662,8 +668,12 @@
       await refreshAll(); await loadSync();
     });
     $("#backfillBtn").onclick = guard(async () => {
-      if (!confirm("从固德威读取所有已关联电站的历史每日发电量（最多 10 年），手动录入的数据不会被覆盖。电站多时需要几分钟，确定开始？")) return;
-      renderSync(await api("/api/sync/backfill", { method: "POST", body: {} }));
+      if (!confirm("从固德威读取历史每日发电量（最多 10 年）。只补录还没补过的电站，每批 5 座、自动等待限流，电站多时需要较长时间，可以关闭页面，后台会继续。手动录入的数据不会被覆盖。确定开始？")) return;
+      let st = await api("/api/sync/backfill", { method: "POST", body: {} });
+      if (st.backfill && st.backfill.nothing && confirm("所有电站都已补录过。要全部重新补录一遍吗？")) {
+        st = await api("/api/sync/backfill", { method: "POST", body: { force: true } });
+      }
+      renderSync(st);
     });
     $("#syncBtn").onclick = guard(async () => {
       $("#syncBtn").disabled = true; $("#syncBtn").textContent = "同步中…";
@@ -689,6 +699,9 @@
       }
     });
 
+    // 手机上点图表会弹出提示框：滚动或点到图表以外的地方时关闭
+    addEventListener("scroll", hideTip, { passive: true });
+    document.addEventListener("pointerdown", e => { if (!e.target.closest(".chart-wrap")) hideTip(); });
     let rz;
     addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => loadChart().catch(() => {}), 150); });
   }

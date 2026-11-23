@@ -128,7 +128,8 @@ def _migrate(conn):
              "power_w": "REAL",            # 最近一次同步的实时功率
              "status_time": "TEXT",        # 最近一次同步时间
              "status_alerted": "INTEGER DEFAULT 0",  # 已发送的状态提醒：0 无 / 1 离线 / 2 故障
-             "offline_streak": "INTEGER DEFAULT 0"}  # 连续几次同步处于“白天离线”
+             "offline_streak": "INTEGER DEFAULT 0",  # 连续几次同步处于“白天离线”
+             "backfill_done": "TEXT"}       # 历史补录完成的日期（为空表示还没补录）
     with conn:
         for col, typ in added.items():
             if col not in cols:

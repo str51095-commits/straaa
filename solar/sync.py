@@ -1,14 +1,19 @@
 """把固德威云平台的发电量同步到本地数据库：定时同步当日、导入电站、补录历史。"""
 import os
 import threading
+import time
 from datetime import date
 
 from . import clock, db, monitor, notify
 from .goodwe import DEFAULT_LOGIN_URL, GoodWeClient, GoodWeError
+from .semsplus import GoodWeRateLimit
 
 SYNC_NOTE = "固德威自动同步"
 BACKFILL_NOTE = "固德威历史补录"
 MAX_BACKFILL_YEARS = 10
+BACKFILL_BATCH = 5            # 每批补录的电站数
+BACKFILL_BATCH_PAUSE = 60     # 每批之间暂停（秒）
+RATE_LIMIT_WAITS = [60, 120, 240, 300, 300]   # 遇到限流时依次等待（秒），然后重试同一座电站
 
 
 def make_client_from_env():
@@ -148,34 +153,70 @@ class GoodWeSync:
         return {"found": len(remote), "created": len(created), "already": linked, "names": created[:50]}
 
     # ---------- 补录历史 ----------
-    def start_backfill(self, years=None):
+    def pending_backfill(self):
+        return [s for s in self._linked_stations() if not s.get("backfill_done")]
+
+    def start_backfill(self, years=None, force=False):
+        """补录历史数据：只补还没补过的电站（force=True 时全部重新补录）。"""
         if not self.status["can_backfill"]:
             raise db.ValidationError("当前接口不支持读取历史数据")
         bf = self.status.get("backfill")
         if bf and bf.get("running"):
             return self.status
-        self.status["backfill"] = {"running": True, "done": 0, "total": 0, "days": 0,
+        if force:
+            with self.lock, self.conn:
+                self.conn.execute("UPDATE stations SET backfill_done = NULL WHERE goodwe_station_id != ''")
+        pending = self.pending_backfill()
+        if not pending:
+            self.status["backfill"] = {"running": False, "done": 0, "total": 0, "days": 0, "errors": [],
+                                       "nothing": True, "message": "所有电站都已补录过历史数据"}
+            return self.status
+        self.status["backfill"] = {"running": True, "done": 0, "total": len(pending), "days": 0,
                                    "message": "准备中…", "errors": []}
-        threading.Thread(target=self._backfill, args=(years,), name="goodwe-backfill", daemon=True).start()
+        threading.Thread(target=self._backfill, args=(pending, years), name="goodwe-backfill", daemon=True).start()
         return self.status
 
-    def _backfill(self, years):
+    def _sleep(self, seconds, bf, why):
+        """可被 stop() 打断的等待，同时显示倒计时。"""
+        end = time.monotonic() + seconds
+        while not self._stop.is_set():
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            bf["message"] = f"{why}，{int(left) + 1} 秒后继续…"
+            self._stop.wait(min(1, left))
+
+    def _backfill(self, stations, years):
         bf = self.status["backfill"]
         try:
-            stations = self._linked_stations()
-            bf["total"] = len(stations)
             today = clock.today()
-            for st in stations:
-                bf["message"] = f"正在补录：{st['name']}"
-                try:
-                    bf["days"] += self._backfill_station(st, today, years)
-                except GoodWeError as e:
-                    bf["errors"].append(f"{st['name']}: {e}")
-                    if _is_auth_error(e):
+            for i, st in enumerate(stations):
+                if self._stop.is_set():
+                    break
+                if i and i % BACKFILL_BATCH == 0:
+                    self._sleep(BACKFILL_BATCH_PAUSE, bf, f"已完成 {i} 座，分批暂停中")
+                for attempt in range(len(RATE_LIMIT_WAITS) + 1):
+                    bf["message"] = f"正在补录：{st['name']}" + (f"（第 {attempt + 1} 次尝试）" if attempt else "")
+                    try:
+                        bf["days"] += self._backfill_station(st, today, years)
+                        with self.lock, self.conn:
+                            self.conn.execute("UPDATE stations SET backfill_done = ? WHERE id = ?",
+                                              (today.isoformat(), st["id"]))
+                        break
+                    except GoodWeRateLimit as e:
+                        if attempt == len(RATE_LIMIT_WAITS):
+                            bf["errors"].append(f"{st['name']}: {e}")
+                            break
+                        self._sleep(RATE_LIMIT_WAITS[attempt], bf, f"固德威限流，等待后重试「{st['name']}」")
+                    except GoodWeError as e:
+                        bf["errors"].append(f"{st['name']}: {e}")
                         break
                 bf["done"] += 1
+                if bf["errors"] and _is_auth_error_msg(bf["errors"][-1]):
+                    break
+            left = len(self.pending_backfill())
             bf["message"] = (f"补录完成：{bf['done']} 座电站，共写入 {bf['days']} 天数据"
-                             + (f"；{len(bf['errors'])} 座失败" if bf["errors"] else ""))
+                             + (f"；{len(bf['errors'])} 座失败，再点一次“补录历史数据”只会补这些" if left else ""))
         except Exception as e:  # noqa: BLE001
             bf["message"] = f"补录出错: {e}"
         finally:
@@ -220,6 +261,10 @@ class GoodWeSync:
 
     def stop(self):
         self._stop.set()
+
+
+def _is_auth_error_msg(msg):
+    return "密码错误" in msg or "password error" in msg.lower()
 
 
 def _is_auth_error(e):
